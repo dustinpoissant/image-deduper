@@ -218,7 +218,7 @@ class DupDetail extends ShadowComponent {
         <div class="row-between" style="margin-bottom:var(--spacer);">
           <h3 style="margin:0;">${g.members.length} images <span class="muted">|</span> ${this.#signals(g)}</h3>
         </div>
-        <div class="ctrl-bar bb">
+        <div class="ctrl-bar bb pb">
           <button class="danger" @click=${() => this.#autoDelete()}><k-icon name="delete_auto"></k-icon> Auto Delete</button>
           <button class="danger" ?disabled=${this.selected.size === 0} @click=${() => this.#deleteSelected()}>
             <k-icon name="delete_sweep"></k-icon> Delete Selected
