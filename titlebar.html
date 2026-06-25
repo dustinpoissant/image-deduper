@@ -1,0 +1,27 @@
+<app-titlebar class="bb">
+  <k-dropdown slot="left" class="no-drag">
+    <button slot="trigger" class="no-btn pq"><k-icon name="menu"></k-icon></button>
+    <k-dropdown>
+      <button slot="trigger"><k-icon name="file"></k-icon> File</button>
+      <button data-value="add-folder"><k-icon name="folder_open"></k-icon> Add Folder</button>
+      <button data-value="reload-app"><k-icon name="refresh"></k-icon> Reload App</button>
+    </k-dropdown>
+    <k-dropdown>
+      <button slot="trigger"><k-icon name="settings"></k-icon> Tools</button>
+      <button data-value="clear-cache"><k-icon name="database"></k-icon> Clear Cache</button>
+      <button data-value="reset-settings"><k-icon name="undo"></k-icon> Reset Settings</button>
+    </k-dropdown>
+    <k-dropdown>
+      <button slot="trigger"><k-icon name="help"></k-icon> Help</button>
+      <button data-value="keyboard-controls"><k-icon name="keyboard"></k-icon> Keyboard Controls</button>
+    </k-dropdown>
+  </k-dropdown>
+  <span>Image Duplicate Detector</span>
+  <k-theme-switcher slot="right" class="no-drag mr" style="--padding: 0.25rem;"></k-theme-switcher>
+</app-titlebar>
+
+<script type="module">
+  document.querySelector('app-titlebar k-dropdown').addEventListener('select', e => {
+    document.dispatchEvent(new CustomEvent('menu-action', { detail: { value: e.detail.value } }));
+  });
+</script>

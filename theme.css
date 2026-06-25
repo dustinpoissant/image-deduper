@@ -1,0 +1,12 @@
+:root {
+  --c_primary: #4f8cff;
+  --radius: 0.5rem;
+  /* kempo-ui's Slider tooltip uses --c_text, but kempo-css names it --tc.
+     Alias it (inherits into component shadow roots) so the tooltip gets a background. */
+  --c_text: var(--tc);
+}
+
+html, body { height: 100%; margin: 0; overflow: hidden; }
+
+/* App layout/styles now live inside the dup-* ShadowComponents (components/),
+   so they are no longer global here. */
