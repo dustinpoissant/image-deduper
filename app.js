@@ -2,4 +2,5 @@
 import "/modules/kempo-ui/dist/components/Split.js";
 import "/modules/kempo-ui/dist/components/ThemeSwitcher.js";
 import "/modules/kempo-ui/dist/components/Dropdown.js";
-import "/components/dup-app.js";
+import "/modules/kempo-ui/dist/components/Context.js";
+import "/components/DupApp.js";

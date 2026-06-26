@@ -4,7 +4,10 @@ import { html, css } from '/modules/kempo-ui/dist/lit-all.min.js';
 // Fullscreen wipe-compare: the left photo is clipped to the area left of the
 // cursor, revealing the right photo underneath — move the mouse to scrub
 // between the two to spot small differences (e.g. a wink) between near-dupes.
-class CompareViewer extends ShadowComponent {
+export default class CompareViewer extends ShadowComponent {
+  /*
+    Reactive Properties / Attributes
+  */
   static properties = {
     leftSrc: { type: String },
     rightSrc: { type: String },
@@ -15,8 +18,15 @@ class CompareViewer extends ShadowComponent {
     split: { type: Number }
   };
 
+  /*
+    Constructor
+  */
   constructor() {
     super();
+
+    /*
+      Init Props
+    */
     this.leftSrc = '';
     this.rightSrc = '';
     this.leftLabel = '';
@@ -26,34 +36,45 @@ class CompareViewer extends ShadowComponent {
     this.split = 50;
   }
 
-  #onMove = (e) => {
+  /*
+    Lifecycle Callbacks
+  */
+  connectedCallback() {
+    super.connectedCallback();
+    document.addEventListener('keydown', this.onKeydown);
+  }
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    document.removeEventListener('keydown', this.onKeydown);
+  }
+
+  /*
+    Event Handlers
+  */
+  onMove = e => {
     const rect = this.renderRoot.querySelector('.frame').getBoundingClientRect();
     const x = Math.min(Math.max(e.clientX - rect.left, 0), rect.width);
     this.split = rect.width ? (x / rect.width) * 100 : 50;
   };
 
-  #close = () => { this.dispatchEvent(new CustomEvent('close')); };
+  onOverlayClick = e => {
+    if (e.target === e.currentTarget) this.close();
+  };
 
-  #onOverlayClick = (e) => { if (e.target === e.currentTarget) this.#close(); };
+  onKeydown = e => {
+    if (e.key === 'Escape') this.close();
+  };
 
-  #onKeydown = (e) => { if (e.key === 'Escape') this.#close(); };
+  close = () => this.dispatchEvent(new CustomEvent('close'));
 
-  connectedCallback() {
-    super.connectedCallback();
-    document.addEventListener('keydown', this.#onKeydown);
-  }
-
-  disconnectedCallback() {
-    super.disconnectedCallback();
-    document.removeEventListener('keydown', this.#onKeydown);
-  }
-
+  /*
+    Rendering
+  */
   render() {
-    const frameStyle = this.frameW && this.frameH ? `aspect-ratio: ${this.frameW} / ${this.frameH};` : '';
     return html`
-      <div class="overlay" @click=${this.#onOverlayClick} @mousemove=${this.#onMove}>
-        <button class="close no-btn" @click=${this.#close}><k-icon name="close"></k-icon></button>
-        <div class="frame" style=${frameStyle}>
+      <div class="overlay" @click=${this.onOverlayClick} @mousemove=${this.onMove}>
+        <button class="close no-btn" @click=${this.close}><k-icon name="close"></k-icon></button>
+        <div class="frame" style=${this.frameW && this.frameH ? `aspect-ratio: ${this.frameW} / ${this.frameH};` : ''}>
           <img class="img base" src=${this.rightSrc} alt="">
           <img class="img clipped" src=${this.leftSrc} alt="" style="clip-path: inset(0 ${100 - this.split}% 0 0);">
           <div class="divider" style="left:${this.split}%"></div>
@@ -62,7 +83,6 @@ class CompareViewer extends ShadowComponent {
         </div>
       </div>`;
   }
-
   static styles = css`
     :host { display: block; }
     .overlay {
@@ -75,12 +95,15 @@ class CompareViewer extends ShadowComponent {
     .img { display: block; max-width: 100%; max-height: 85vh; object-fit: contain; user-select: none; pointer-events: none; width: 100%; height: 100%; }
     .clipped { position: absolute; inset: 0; }
     .divider { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; transform: translateX(-1px); pointer-events: none; }
-    .label { position: absolute; top: .5rem; color: #fff; background: rgba(0,0,0,.6); padding: .25rem .5rem; border-radius: var(--radius); font-size: .85em; pointer-events: none; }
-    .label.left { left: .5rem; }
-    .label.right { right: .5rem; }
-    .close { position: absolute; top: 1rem; right: 1rem; z-index: 1; background: none; border: none; color: #fff; cursor: pointer; }
+    .label { position: absolute; top: var(--spacer_h); color: #fff; background: rgba(0,0,0,.6); padding: var(--spacer_q) var(--spacer_h); border-radius: var(--radius); font-size: var(--fs_small); pointer-events: none; }
+    .label.left { left: var(--spacer_h); }
+    .label.right { right: var(--spacer_h); }
+    .close { position: absolute; top: var(--spacer); right: var(--spacer); z-index: 1; background: none; border: none; color: #fff; cursor: pointer; }
   `;
 
+  /*
+    Static Methods
+  */
   static open({ leftSrc, leftLabel, rightSrc, rightLabel, frameW, frameH }) {
     const mountRoot = document.querySelector('[data-overlay-root]') || document.body;
 
@@ -106,16 +129,14 @@ class CompareViewer extends ShadowComponent {
     document.body.classList.add('no-scroll');
     if (mountRoot !== document.body) mountRoot.classList.add('no-scroll');
 
-    const cleanup = () => {
+    viewer.addEventListener('close', () => {
       document.body.classList.remove('no-scroll');
       if (mountRoot !== document.body) mountRoot.classList.remove('no-scroll');
       container.remove();
-    };
-    viewer.addEventListener('close', cleanup);
+    });
 
     return viewer;
   }
 }
 
 customElements.define('compare-viewer', CompareViewer);
-export default CompareViewer;
