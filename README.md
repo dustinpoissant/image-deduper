@@ -88,39 +88,3 @@ Three resizable columns (kempo-ui `<k-split>` ×2, sizes persisted via `persiste
 2. **Middle** — list of duplicate sets, each showing a thumbnail, member count and per-tier scores.
 3. **Right** — the selected set: every image with dimensions/size/path, a tile-size
    picker, and Open / Reveal / Trash / Compare / Not Duplicates / Auto Delete actions.
-
-## Project layout
-
-```
-package.json          kempo-app config + deps
-app.js                 renderer: registers kempo-ui components
-shell.html             full-height app frame
-theme.css              accent overrides
-pages/index.html       <k-context>s wrapping <id-app>
-components/             web components (one per file, PascalCase, <id-*> tags)
-  App.js                orchestrator: scan pipeline + results, owns engine state
-  Controls.js            left pane: sources, detection tiers, settings
-  Results.js             middle pane: duplicate-set list
-  Detail.js               right pane: images of the selected set + actions
-  Dupe.js                 one duplicate-set row in Results
-  ImageCard.js            one image tile in Detail
-  Scores.js               per-tier % score widget
-  SourceCard.js / SourceItem.js   Reference/Search import cards
-  ToggleSlider.js / SliderInput.js  detection-tier and settings sliders
-  CompareViewer.js         fullscreen wipe-compare overlay
-lib/
-  engine.js               clustering, caching, ORB matcher, thumbnails (renderer side)
-  api.js                  proxy over window.api
-  contexts.js             getConfig/getUI — locate the k-context elements
-  styles.js               shared Lit styles
-api/                     main-process functions exposed as window.api.*
-  selectDirectories.js / selectImages.js   native pickers
-  scanImages.js           recursive image walk
-  fileIdentities.js       content-hash resolution
-  initEngine.js           load the model (GPU→CPU)
-  embedImages.js          pHash + embedding per batch
-  grayBuffer.js           grayscale buffer for ORB
-  thumbnail.js            oriented preview data URLs
-  fileAction.js           open / reveal / trash
-docs/                    project docs site (kempo-css via CDN)
-```

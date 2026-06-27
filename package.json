@@ -3,6 +3,12 @@
   "version": "0.1.0",
   "description": "Find duplicate images even when cropped, rotated, scaled, filtered, or watermarked.",
   "type": "module",
+  "author": "Dustin Poissant <dustinpoissant@gmail.com>",
+  "homepage": "https://github.com/dustinpoissant/image-deduper",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dustinpoissant/image-deduper.git"
+  },
   "kempo-app": {
     "appName": "Image Deduper",
     "appIcon": "media/icon.png",

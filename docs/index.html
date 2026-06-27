@@ -13,6 +13,11 @@
        logo icon against the wordmark needs flex-shrink protection here instead, or a
        narrow viewport compresses both the icon and the nav links' text down to
        nothing trying to fit everything on one line. */
+    :root {
+      --c_primary: #0033ff;
+      --radius: 0.5rem;
+      --c_text: var(--tc);
+    }
     k-nav a[href="./"] { flex-shrink: 0; white-space: nowrap; }
     k-nav img { flex-shrink: 0; object-fit: contain; }
     @media (max-width: 640px) {
@@ -22,7 +27,7 @@
   <script>
     window.kempo = {
       pathToStylesheet: 'https://cdn.jsdelivr.net/npm/kempo-css@2/dist/kempo.min.css',
-      pathsToIcons: ['https://cdn.jsdelivr.net/npm/kempo-ui@0.4/icons']
+      pathsToIcons: ['./icons','https://cdn.jsdelivr.net/npm/kempo-ui@0.4/icons']
     };
   </script>
 
@@ -30,16 +35,12 @@
 <body>
 
   <k-nav fixed class="bg-primary">
-    <a href="./" class="d-if ph" style="align-items: center">
-      <img src="./media/icon.png" alt="Image Deduper" width="24" height="24" class="pr" />
-      Image Deduper
-    </a>
-    <div class="flex"></div>
     <a href="#how-it-works">How it works</a>
     <a href="#reference-vs-search">Reference / Search</a>
     <a href="#cache">Cache</a>
     <a href="#auto-delete">Auto Delete</a>
     <a href="#build">Build</a>
+    <div class="flex"></div>
     <a href="https://github.com/dustinpoissant/image-deduper" target="_blank"><k-icon name="github-mark"></k-icon></a>
     <k-theme-switcher
       class="mr"
@@ -57,7 +58,7 @@
     <main>
 
       <div class="ta-center mb">
-        <img src="./media/icon.png" alt="" width="64" height="64" class="mb" />
+        <img src="./media/icon.png" alt="" width="256" height="256" class="mb" />
         <h1 class="mt0 mbq">Image Deduper</h1>
         <p class="tc-muted">
           Finds duplicate images even when they've been cropped, rotated, scaled,
@@ -65,31 +66,33 @@
         </p>
         <p>
           <a href="https://github.com/dustinpoissant/image-deduper/releases/latest/download/Image-Deduper-Setup.exe"
-            class="btn primary mr"><k-icon name="download" class="mrq"></k-icon> Download for Windows</a>
-          <a href="https://github.com/dustinpoissant/image-deduper" class="btn" target="_blank">GitHub</a>
+            class="btn primary mr"><k-icon name="windows" class="mrq"></k-icon> Download for Windows</a>
+          <a href="https://github.com/dustinpoissant/image-deduper" class="btn" target="_blank"><k-icon name="github-mark"></k-icon> GitHub</a>
         </p>
       </div>
 
-      <div class="b r p mb" style="border-color: var(--c_warning)">
-        <p class="m0">
-          <strong><k-icon name="warning" class="mrq"></k-icon> Before you install:</strong>
-          this app bundles a neural network (DINOv2, via ONNX Runtime) for the
-          crop/rotation/filter-resistant matching tier — the installed app is
-          <strong>~1.5GB</strong>, not a typical few-MB installer. Everything runs
-          fully offline; the model ships with the app and nothing is uploaded anywhere.
+      <div class="card">
+        <h5 class="tc-warning"><k-icon name="warning" class="mrq"></k-icon> Important Notice</h5>
+        <hr />
+        <p>
+          This app contains an AI neural network (DINOv2, via ONNX Runtime) for duplicate image detection.<br />
         </p>
-      </div>
-
-      <section id="requirements" class="mb">
-        <h2>System requirements</h2>
-        <ul class="mb">
-          <li><strong>OS</strong> — Windows 10/11, 64-bit (x64). No installer for mac/Linux yet.</li>
-          <li><strong>Disk space</strong> — ~1.5GB free for the install.</li>
-          <li><strong>RAM</strong> — 4GB+ recommended.</li>
-          <li><strong>GPU</strong> — optional. A DirectX 12-capable GPU speeds up the neural
-            tier (DirectML); without one it automatically falls back to CPU.</li>
+        <h6>Pros:</h6>
+        <ul>
+          <li>The app runs 100% offline.</li>
+          <li>No data is ever sent to any server.</li>
+          <li>100% privacy garenteed.</li>
         </ul>
-      </section>
+        <h6>Cons:</h6>
+        <ul>
+          <li>Very large app size — 1.5GB</li>
+          <li>Large system requirements</li>
+          <ul class="mb0">
+            <li>GPU Recommended, it can run on only CPU but is very slow.</li>
+            <li>Requires up to 4GB of free RAM just for this app.</li>
+          </ul>
+        </li>
+      </div>
 
       <section id="how-it-works" class="mb">
         <h2>How it works — a 3-tier hybrid engine</h2>
@@ -209,35 +212,6 @@ npm run make      # dist/*.exe — real NSIS installer wizard (Start Menu + Desk
           <a href="https://github.com/dustinpoissant/kempo-app" target="_blank">kempo-app</a>'s docs
           for how packaging works under the hood.
         </p>
-      </section>
-
-      <section id="ui" class="mb">
-        <h2>UI</h2>
-        <p>Three resizable columns (kempo-ui <code>&lt;k-split&gt;</code> ×2, sizes persisted via <code>persistent-id</code>):</p>
-        <div class="row -mx mb">
-          <div class="col m-span-12 d-span-4 px">
-            <div class="b r p">
-              <h4 class="mt0">Left</h4>
-              <p class="tc-muted small m0">Reference/Search source cards, detection tiers +
-                thresholds, Settings, Start Scan.</p>
-            </div>
-          </div>
-          <div class="col m-span-12 d-span-4 px">
-            <div class="b r p">
-              <h4 class="mt0">Middle</h4>
-              <p class="tc-muted small m0">List of duplicate sets, each showing a thumbnail,
-                member count and per-tier scores.</p>
-            </div>
-          </div>
-          <div class="col m-span-12 d-span-4 px">
-            <div class="b r p">
-              <h4 class="mt0">Right</h4>
-              <p class="tc-muted small m0">The selected set: every image with dimensions/size/path,
-                a tile-size picker, and Open / Reveal / Trash / Compare / Not Duplicates / Auto
-                Delete actions.</p>
-            </div>
-          </div>
-        </div>
       </section>
 
     </main>
