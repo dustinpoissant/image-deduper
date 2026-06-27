@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Image Deduper</title>
+  <link rel="icon" type="image/png" href="./media/icon.png">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/kempo-css@2/dist/kempo.min.css" />
+  <script>
+    window.kempo = {
+      pathToStylesheet: 'https://cdn.jsdelivr.net/npm/kempo-css@2/dist/kempo.min.css',
+      pathsToIcons: ['https://cdn.jsdelivr.net/npm/kempo-ui@0.4/icons']
+    };
+  </script>
+
+</head>
+<body>
+
+  <k-nav fixed class="bg-primary">
+    <a href="./" class="d-if ph" style="align-items: center">
+      <img src="./media/icon.png" alt="Image Deduper" width="24" height="24" class="pr" />
+      Image Deduper
+    </a>
+    <div class="flex"></div>
+    <a href="#how-it-works">How it works</a>
+    <a href="#reference-vs-search">Reference / Search</a>
+    <a href="#cache">Cache</a>
+    <a href="#auto-delete">Auto Delete</a>
+    <a href="#build">Build</a>
+    <a href="https://github.com/dustinpoissant/image-deduper" target="_blank"><k-icon name="github-mark"></k-icon></a>
+    <k-theme-switcher
+      class="mr"
+      style="
+        --padding: 0.5rem;
+        --c_active: var(--tc_on_primary);
+        --tc_active: var(--c_primary);
+        --c_inactive__hover: rgba(255, 255, 255, 0.1);
+      "
+    ></k-theme-switcher>
+  </k-nav>
+  <div style="width: 100%; height: 4rem;"></div>
+
+  <k-main>
+    <main>
+
+      <div class="ta-center mb">
+        <img src="./media/icon.png" alt="" width="64" height="64" class="mb" />
+        <h1 class="mt0 mbq">Image Deduper</h1>
+        <p class="tc-muted">
+          Finds duplicate images even when they've been cropped, rotated, scaled,
+          re-filtered/toned, or watermarked.
+        </p>
+        <p>
+          <a href="https://github.com/dustinpoissant/image-deduper" class="btn primary mr" target="_blank">GitHub</a>
+        </p>
+      </div>
+
+      <section id="how-it-works" class="mb">
+        <h2>How it works — a 3-tier hybrid engine</h2>
+        <div class="table-wrapper mb">
+          <table class="full">
+            <thead>
+              <tr>
+                <th>Tier</th>
+                <th>Tech</th>
+                <th>Catches</th>
+                <th>Cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>1. Perceptual hash</td>
+                <td><code>sharp</code> + 32×32 DCT pHash (8 dihedral orientations)</td>
+                <td>exact dupes, rescales, recompression, 90° rotations &amp; mirrors</td>
+                <td>trivial</td>
+              </tr>
+              <tr>
+                <td>2. Neural embeddings</td>
+                <td>DINOv2 via <code>@huggingface/transformers</code> (native <code>onnxruntime-node</code>, GPU→CPU)</td>
+                <td><strong>crop, arbitrary rotation, scale, filters/tone, watermark</strong></td>
+                <td>one inference per image</td>
+              </tr>
+              <tr>
+                <td>3. Geometric verification</td>
+                <td>ORB + RANSAC homography via <code>@techstark/opencv-js</code></td>
+                <td>confirms true geometric overlap on borderline pairs</td>
+                <td>only borderline pairs</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Each tier has its own enable toggle and confidence threshold (left pane,
+          <strong>Detection Algorithms</strong>) — a pair links into a duplicate set if
+          <em>any</em> enabled tier clears its threshold.
+        </p>
+      </section>
+
+      <section id="reference-vs-search" class="mb">
+        <h2>Reference vs. Search images</h2>
+        <p>Sources are split into two roles:</p>
+        <ul class="mb">
+          <li><strong>Reference</strong> — known-good images you trust, never compared to each other.</li>
+          <li><strong>Search</strong> — the images being checked against the references (and, with
+            no references at all, against each other — the simple "find dupes in this folder" case).</li>
+        </ul>
+        <p>
+          Because references are never compared to one another, two different references can never
+          end up merged into the same duplicate group — even if both happen to match the same
+          ambiguous search image, only the closer match keeps it.
+        </p>
+      </section>
+
+      <section id="cache" class="mb">
+        <h2>Persistent cache (no re-scanning)</h2>
+        <p>
+          Results are cached in SQLite (<code>better-sqlite3</code>, via kempo-app's DB, stored under
+          the app's userData dir) so re-scans only do <em>new</em> work:
+        </p>
+        <ul class="mb">
+          <li><code>images</code> — features (pHash + neural embedding) keyed by <strong>content
+            hash</strong> (SHA-256 of the bytes). Because identity is the content, a <strong>rename or
+            move is free</strong> — the features are reused.</li>
+          <li><code>paths</code> — <code>path → {size, mtime, hash}</code>, so unchanged files skip
+            re-hashing entirely.</li>
+          <li><code>orbcache</code> — the expensive geometric scores, keyed by the sorted
+            <strong>hash pair</strong>.</li>
+          <li><code>excluded_pairs</code> — hash pairs explicitly marked <strong>Not Duplicates</strong>,
+            so they (and anything transitively linked to them) never re-group on a later scan.</li>
+        </ul>
+        <p>
+          Adding one image to a scanned folder computes features for just that image and only
+          compares it against the others; every prior comparison is loaded from cache. The results
+          header shows e.g. <code>12 files · 12 unique · features: 1 new / 11 cached · geometry: 4
+          new / 53 cached</code>. A <strong>Clear cache</strong> button resets it.
+        </p>
+      </section>
+
+      <section id="auto-delete" class="mb">
+        <h2>Auto Delete</h2>
+        <p>
+          Picks the image to keep per duplicate set — highest resolution first, ties broken by
+          most-lossless format, then smallest file size, then filename — and asks to delete the
+          rest. Filenames containing "screenshot" (any case) are deprioritized by default, since a
+          screenshot is often higher-resolution than the original purely because of the capturing
+          device, not because it's a better copy to keep (toggleable in Settings).
+        </p>
+      </section>
+
+      <section id="run" class="mb">
+        <h2>Run</h2>
+        <div class="b r mb p">
+          <pre><code>npm install
+npm run dev       # Electron + DevTools + CDP on port 9222
+# or
+npm start</code></pre>
+        </div>
+        <p>
+          On the <strong>first</strong> scan with neural matching enabled, the DINOv2 model (~tens of
+          MB) is downloaded from the Hugging Face hub and cached. <code>better-sqlite3</code> v12
+          ships N-API prebuilds that load in Electron as-is — no native rebuild step needed.
+        </p>
+      </section>
+
+      <section id="build" class="mb">
+        <h2>Build</h2>
+        <div class="b r mb p">
+          <pre><code>npm run package   # dist/win-unpacked/ — runnable folder, no installer
+npm run make      # dist/*.exe — real NSIS installer wizard (Start Menu + Desktop shortcut)</code></pre>
+        </div>
+        <p>
+          Host OS/arch only, no cross-compiling. See
+          <a href="https://github.com/dustinpoissant/kempo-app" target="_blank">kempo-app</a>'s docs
+          for how packaging works under the hood.
+        </p>
+      </section>
+
+      <section id="ui" class="mb">
+        <h2>UI</h2>
+        <p>Three resizable columns (kempo-ui <code>&lt;k-split&gt;</code> ×2, sizes persisted via <code>persistent-id</code>):</p>
+        <div class="row -mx mb">
+          <div class="col m-span-12 d-span-4 px">
+            <div class="b r p">
+              <h4 class="mt0">Left</h4>
+              <p class="tc-muted small m0">Reference/Search source cards, detection tiers +
+                thresholds, Settings, Start Scan.</p>
+            </div>
+          </div>
+          <div class="col m-span-12 d-span-4 px">
+            <div class="b r p">
+              <h4 class="mt0">Middle</h4>
+              <p class="tc-muted small m0">List of duplicate sets, each showing a thumbnail,
+                member count and per-tier scores.</p>
+            </div>
+          </div>
+          <div class="col m-span-12 d-span-4 px">
+            <div class="b r p">
+              <h4 class="mt0">Right</h4>
+              <p class="tc-muted small m0">The selected set: every image with dimensions/size/path,
+                a tile-size picker, and Open / Reveal / Trash / Compare / Not Duplicates / Auto
+                Delete actions.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+    <div style="height:20vh"></div>
+  </k-main>
+
+  <script type="module" src="https://cdn.jsdelivr.net/npm/kempo-ui@0.4/dist/components/Nav.js"></script>
+  <script type="module" src="https://cdn.jsdelivr.net/npm/kempo-ui@0.4/dist/components/Icon.js"></script>
+  <script type="module" src="https://cdn.jsdelivr.net/npm/kempo-ui@0.4/dist/components/ThemeSwitcher.js"></script>
+
+  <script type="module">
+    document.addEventListener('click', function(e) {
+      if (e.target.matches('a[href^="#"]')) {
+        e.preventDefault();
+        const targetId = e.target.getAttribute('href').replace('#', '');
+        const target = document.getElementById(targetId);
+        if (target) {
+          target.scrollIntoView({ behavior: 'smooth' });
+          history.replaceState(null, '', window.location.pathname + window.location.search + '#' + targetId);
+        }
+      }
+    });
+  </script>
+
+</body>
+</html>
