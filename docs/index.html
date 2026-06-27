@@ -151,22 +151,26 @@
             <thead>
               <tr>
                 <th>Pass</th>
+                <th>Algorithm name</th>
                 <th>What it's good at</th>
               </tr>
             </thead>
             <tbody>
               <tr>
                 <td><strong>1. Quick fingerprint</strong></td>
+                <td>Perceptual hash</td>
                 <td>Near-instant. Catches exact copies, re-saves, resizes, and simple
                   90° rotations or mirror flips.</td>
               </tr>
               <tr>
                 <td><strong>2. AI visual match</strong></td>
+                <td>Neural look-alikes</td>
                 <td>The built-in neural network recognizes the <em>same photo</em> even
                   after a crop, an arbitrary rotation, a filter, or a watermark.</td>
               </tr>
               <tr>
                 <td><strong>3. Pixel-level confirmation</strong></td>
+                <td>Geometric (ORB)</td>
                 <td>For anything borderline from pass 2, lines up the actual pixels to
                   confirm it's a real match before flagging it.</td>
               </tr>
@@ -174,9 +178,11 @@
           </table>
         </div>
         <p>
-          Each pass can be turned on or off, and how strict it is can be tuned, from the
-          <strong>Detection Algorithms</strong> panel on the left. A pair of photos counts
-          as duplicates if <em>any</em> enabled pass is confident enough.
+          Each pass has its own confidence slider in the <strong>Detection Algorithms</strong>
+          panel on the left, all on the same scale: <strong>0% means confidently different,
+          100% means confidently the same photo, and 50% — the default for all three — is the
+          actual tipping point</strong> where that pass is genuinely on the fence. A pair of
+          photos counts as duplicates if <em>any</em> enabled pass clears its threshold.
         </p>
       </section>
 

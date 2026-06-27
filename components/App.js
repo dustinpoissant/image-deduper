@@ -21,9 +21,10 @@ const alertDialog = (text, opts = {}) => new Promise(res => Dialog.alert(text, r
 const errorDialog = (text, opts = {}) => new Promise(res => Dialog.error(text, res, opts));
 
 const DEFAULT_SETTINGS = { recursive: true, usePhash: true, useNN: true, useGeo: true, preferGPU: true, confirmDelete: true, maxGroupSize: 10, thumbSize: 'medium', deprioritizeScreenshots: true };
-// Per-tier match thresholds (%). Neural defaults high so it groups only
-// near-identical images, not "same subject" look-alikes.
-const DEFAULT_THRESHOLDS = { phash: 60, nn: 90, geo: 55 };
+// Per-tier match thresholds (%). Each tier's raw score is remapped (see lib/engine.js's
+// remapEmbed/remapPhash/remapOrb) so 50% lands exactly on that tier's real decision
+// boundary — the same default works for all three instead of needing separate tuning.
+const DEFAULT_THRESHOLDS = { phash: 50, nn: 50, geo: 50 };
 
 /*
   Symbols
