@@ -61,37 +61,6 @@ Sources are split into **Reference** (trusted images, never compared to each oth
 there are no references). This guarantees two references can never get merged into the
 same duplicate group.
 
-## Project layout
-
-```
-app.js                  Renderer entry — registers kempo-ui components + App
-pages/index.html        <k-context>s wrapping <id-app> (app-level state)
-shell.html               kempo-app shell
-titlebar.html            Menu → dispatches 'menu-action' events
-theme.css                kempo-css variable overrides
-components/              Web components (one per file, <id-*> tags)
-  App.js                 Orchestrator: scan pipeline + results, owns engine state
-  Controls.js             Left pane: sources, detection tiers, settings
-  Results.js              Middle pane: duplicate-set list
-  Detail.js               Right pane: images of the selected set + actions
-  Dupe.js                 One duplicate-set row in Results
-  ImageCard.js            One image tile in Detail
-  Scores.js               Per-tier % score widget
-  SourceCard.js           Reference/Search import card in Controls
-  SourceItem.js           One source path row inside a SourceCard
-  ToggleSlider.js         Enable-toggle + threshold slider, one per detection tier
-  SliderInput.js          Slider + editable number box (shared by ToggleSlider and Settings)
-  CompareViewer.js        Fullscreen wipe-compare overlay
-lib/
-  engine.js               Clustering, caching, ORB matcher, thumbnails
-  api.js                  Proxy over window.api
-  contexts.js             getConfig/getUI — locate the k-context elements
-  styles.js               Shared Lit styles
-api/                      Main-process handlers → window.api.<name>()
-example/                  Sample ref/search image sets for manually exercising detection
-docs/                     Source for the GitHub Pages user-facing site
-```
-
 ## Contributing
 
 Issues and PRs welcome. Component code follows the conventions in
