@@ -92,9 +92,10 @@ export default class Controls extends ShadowComponent {
       </div>`;
 
     // A detection tier as an accordion section: icon + name in the header; description,
-    // enable toggle and threshold slider revealed inside the panel. `step` defaults to
-    // whole percent; Geometric uses 0.5 since its useful range is much narrower.
-    this[tier] = (key, t, icon, label, desc, step = 1) => {
+    // enable toggle and threshold slider revealed inside the panel. All three tiers'
+    // raw scores are remapped (lib/engine.js) onto the same 1-100% confidence scale, so
+    // one whole-percent step works for all of them.
+    this[tier] = (key, t, icon, label, desc) => {
       const off = !this.settings[key];
       return html`
         <k-accordion-header for-panel=${t} class="row ai-c ph ${off ? 'tier-off' : ''}">
@@ -103,7 +104,7 @@ export default class Controls extends ShadowComponent {
         <k-accordion-panel name=${t}>
           <div class="ph">
             <p class="tc-muted small mbh">${desc}</p>
-            <id-toggle-slider label=${'Enable ' + label} .checked=${this.settings[key]} min="0" max="99" step=${step}
+            <id-toggle-slider label=${'Enable ' + label} .checked=${this.settings[key]} min="1" max="100"
               .value=${this.thresholds[t]} format="percent"
               @toggle=${e => this[setSetting](key, e.detail.checked)}
               @change=${e => this[setThreshold](t, e.detail.value)}></id-toggle-slider>
@@ -179,7 +180,7 @@ export default class Controls extends ShadowComponent {
             ${this[tier]('useNN', 'nn', 'network_intelligence', 'Neural look-alikes',
               'A neural network (DINOv2) measures visual similarity, so it can spot edited or filtered versions. It also rates different photos of the same subject as similar — keep the threshold high so it only groups near-identical images.')}
             ${this[tier]('useGeo', 'geo', 'shapes', 'Geometric (ORB)',
-              'Matches actual image content (keypoints + geometry), catching crops, rotations, scaling and watermarked copies of the same photo. The most reliable signal for true duplicates.', 0.5)}
+              'Matches actual image content (keypoints + geometry), catching crops, rotations, scaling and watermarked copies of the same photo. The most reliable signal for true duplicates.')}
           </k-accordion>
         </div>
 
