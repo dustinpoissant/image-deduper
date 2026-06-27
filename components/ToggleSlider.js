@@ -14,6 +14,7 @@ export default class ToggleSlider extends ShadowComponent {
     checked: { type: Boolean },
     min: { type: Number },
     max: { type: Number },
+    step: { type: Number },
     value: { type: Number },
     format: { type: String }
   };
@@ -31,6 +32,7 @@ export default class ToggleSlider extends ShadowComponent {
     this.checked = false;
     this.min = 0;
     this.max = 100;
+    this.step = 1;
     this.value = 0;
     this.format = 'integer';
   }
@@ -50,7 +52,7 @@ export default class ToggleSlider extends ShadowComponent {
         <k-toggle .value=${this.checked} @change=${this.onToggle}></k-toggle>
         <span class="mlh">${this.label}</span>
       </div>
-      <id-slider-input class="mt" min=${this.min} max=${this.max} .value=${this.value} format=${this.format}
+      <id-slider-input class="mt" min=${this.min} max=${this.max} step=${this.step} .value=${this.value} format=${this.format}
         @change=${this.onSliderChange}></id-slider-input>`;
   }
 

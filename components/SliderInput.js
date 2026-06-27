@@ -6,6 +6,7 @@ import '/modules/kempo-ui/dist/components/Slider.js';
   Symbols
 */
 const commit = Symbol('commit');
+const snap = Symbol('snap');
 
 // A slider paired with an editable value box — used for any min/max numeric setting.
 // `format` controls only the display suffix ('percent' shows "70%", anything else
@@ -17,6 +18,7 @@ export default class SliderInput extends ShadowComponent {
   static properties = {
     min: { type: Number },
     max: { type: Number },
+    step: { type: Number },
     value: { type: Number },
     format: { type: String },
     // The input shows a bare number while focused, the formatted display otherwise.
@@ -32,11 +34,14 @@ export default class SliderInput extends ShadowComponent {
     /*
       Private Methods
     */
-    // Clamp/round to range, write it, then drop back to the formatted display.
+    // Snap to the nearest step, then clamp to range — step < 1 (e.g. 0.5) is how the
+    // Geometric tier gets half-percent precision; everything else stays whole numbers.
+    this[snap] = n => Math.round(n / this.step) * this.step;
+    // Clamp/snap to range, write it, then drop back to the formatted display.
     this[commit] = raw => {
       this.editing = false;
       const n = typeof raw === 'number' ? raw : parseFloat(raw);
-      this.value = Number.isFinite(n) ? Math.min(this.max, Math.max(this.min, Math.round(n))) : Math.round(this.value);
+      this.value = Number.isFinite(n) ? Math.min(this.max, Math.max(this.min, this[snap](n))) : this[snap](this.value);
       this.dispatchEvent(new CustomEvent('change', { detail: { value: this.value } }));
     };
 
@@ -45,6 +50,7 @@ export default class SliderInput extends ShadowComponent {
     */
     this.min = 0;
     this.max = 100;
+    this.step = 1;
     this.value = 0;
     this.format = 'integer';
     this.editing = false;
@@ -62,12 +68,14 @@ export default class SliderInput extends ShadowComponent {
     Rendering
   */
   render() {
-    const rounded = Math.round(this.value);
-    const display = this.editing ? String(rounded) : this.format === 'percent' ? `${rounded}%` : String(rounded);
+    // Fractional steps (e.g. 0.5) need a decimal shown, or the value visibly can't move.
+    const decimals = this.step % 1 === 0 ? 0 : 1;
+    const shown = this[snap](this.value).toFixed(decimals);
+    const display = this.editing ? shown : this.format === 'percent' ? `${shown}%` : shown;
     return html`
-      <k-slider class="col d-b" min=${this.min} max=${this.max} tooltip .format=${this.format === 'percent' ? '0%' : null}
+      <k-slider class="col d-b" min=${this.min} max=${this.max} tooltip .format=${this.format === 'percent' ? (decimals ? '0.0%' : '0%') : null}
         .value=${String(this.value)} @change=${this.onSliderChange}></k-slider>
-      <input type="text" inputmode="numeric" class="val mlh" .value=${display}
+      <input type="text" inputmode="decimal" class="val mlh" .value=${display}
         @focus=${this.onFocus} @blur=${this.onBlur} @keydown=${this.onKeydown}>`;
   }
 

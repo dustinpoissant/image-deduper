@@ -23,7 +23,7 @@ const errorDialog = (text, opts = {}) => new Promise(res => Dialog.error(text, r
 const DEFAULT_SETTINGS = { recursive: true, usePhash: true, useNN: true, useGeo: true, preferGPU: true, confirmDelete: true, maxGroupSize: 10, thumbSize: 'medium', deprioritizeScreenshots: true };
 // Per-tier match thresholds (%). Neural defaults high so it groups only
 // near-identical images, not "same subject" look-alikes.
-const DEFAULT_THRESHOLDS = { phash: 70, nn: 90, geo: 55 };
+const DEFAULT_THRESHOLDS = { phash: 60, nn: 90, geo: 55 };
 
 /*
   Symbols
@@ -98,14 +98,16 @@ export default class App extends ShadowComponent {
 
     // Build the settings+thresholds object for clustering. Thresholds use the *rounded*
     // (displayed) value so results are deterministic for a given shown %, not drifting
-    // across the slider's fractional value.
+    // across the slider's fractional value — rounded to 1 decimal place rather than a
+    // whole number, since Geometric's slider moves in half-percent steps.
     this[clusterSettings] = () => {
       const t = this.thresholds;
+      const round1 = n => Math.round(n * 10) / 10;
       return {
         ...this.settings,
-        tPhash: Math.round(t.phash) / 100,
-        tNN: Math.round(t.nn) / 100,
-        tGeo: Math.round(t.geo) / 100
+        tPhash: round1(t.phash) / 100,
+        tNN: round1(t.nn) / 100,
+        tGeo: round1(t.geo) / 100
       };
     };
 
@@ -359,9 +361,15 @@ export default class App extends ShadowComponent {
 
       for (const it of items) { const f = featByHash.get(it.hash); if (f) { it.phash = f.phash; it.embedding = f.embedding; } }
       this.items = items;
-      const summary = { files: items.length, unique: uniqueHashes.length, newFeat: missingHashes.length, reusedFeat: uniqueHashes.length - missingHashes.length, newOrb: 0, reusedOrb: 0 };
+      // Recorded so a later settings change can tell whether a now-enabled tier was
+      // actually analyzed this scan (onConfigChange uses it to offer a rescan).
+      const summary = {
+        files: items.length, unique: uniqueHashes.length, newFeat: missingHashes.length,
+        reusedFeat: uniqueHashes.length - missingHashes.length, newOrb: 0, reusedOrb: 0,
+        computedTiers: { usePhash, useNN, useGeo }
+      };
 
-      this[pairs] = buildCandidatePairs(this.items);
+      this[pairs] = buildCandidatePairs(this.items, this.settings);
 
       // Load every user-confirmed not-duplicate pair (clusterPairs needs the full set to
       // catch transitive conflicts, not just direct candidate pairs — see its comment).
@@ -375,13 +383,16 @@ export default class App extends ShadowComponent {
 
       // 3) Geometric verification. The neural embedding only *finds candidates* here;
       //    grouping requires real copy evidence (ORB overlap or pHash) — see pairScore.
-      //    Verify the most-similar candidate pairs first (highest embedding/pHash).
+      //    Verify the most-similar candidate pairs first (highest embedding/pHash) — unless
+      //    neither ran, in which case there's no similarity to sort by, so every pair goes
+      //    through (Geometric is solo: it's the only signal that gets to decide a match).
       if (useGeo && !this[cancelRequested]) {
         const ORB_CAP = 6000;
+        const cheapSignal = usePhash || useNN;
         const sim = p => Math.max(p.sEmbed, p.sPhash);
         const keyOf = p => pairKey(this.items[p.i].hash, this.items[p.j].hash);
         const border = this[pairs]
-          .filter(p => this.items[p.i].hash !== this.items[p.j].hash && sim(p) >= 0.2)
+          .filter(p => this.items[p.i].hash !== this.items[p.j].hash && (!cheapSignal || sim(p) >= 0.2))
           .sort((a, b) => sim(b) - sim(a))
           .slice(0, ORB_CAP);
         if (border.length) {
@@ -442,7 +453,10 @@ export default class App extends ShadowComponent {
 
   // Re-cluster when a detection setting or threshold changes, and clear stale results
   // when a source is removed (the dup-config context is written by the controls pane).
-  onConfigChange = e => {
+  // Turning a tier back on doesn't make it analyze anything by itself — its
+  // phash/embedding/ORB data is simply missing from the last scan's results — so
+  // offer a rescan whenever a tier flips on that the last scan didn't actually compute.
+  onConfigChange = async e => {
     const { key, oldValue, value } = e.detail;
     if (key === 'sources') {
       const paths = src => [...(src?.reference || []), ...(src?.search || [])].map(s => s.path);
@@ -453,7 +467,22 @@ export default class App extends ShadowComponent {
         document.querySelectorAll('k-photo-viewer[fullscreen]').forEach(v => v.close());
         this.items = []; this[pairs] = []; this.groups = []; this.lastScan = null; this.selectedId = null;
       }
-    } else if ((key === 'settings' || key === 'thresholds') && this.items.length) {
+    } else if (key === 'settings') {
+      const computed = this.lastScan?.computedTiers;
+      if (computed && this.items.length) {
+        const TIER_LABELS = { usePhash: 'Perceptual hash', useNN: 'Neural look-alikes', useGeo: 'Geometric (ORB)' };
+        const newlyEnabled = Object.keys(TIER_LABELS).filter(k => value[k] && !oldValue[k] && !computed[k]);
+        if (newlyEnabled.length) {
+          const names = newlyEnabled.map(k => TIER_LABELS[k]);
+          const ok = await confirmDialog(
+            `<p class="p">${names.join(' and ')} ${names.length > 1 ? "weren't" : "wasn't"} analyzed in the last scan, ` +
+            `so turning it on alone won't find anything for it. Rescan now?</p>`,
+            { title: 'Rescan needed', confirmText: 'Rescan', cancelText: 'Not now' });
+          if (ok) { this.scan(); return; }
+        }
+      }
+      if (this.items.length) this[recluster]();
+    } else if (key === 'thresholds' && this.items.length) {
       this[recluster]();
     }
   };
