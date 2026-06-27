@@ -7,6 +7,18 @@
   <title>Image Deduper</title>
   <link rel="icon" type="image/png" href="./media/icon.png">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/kempo-css@2/dist/kempo.min.css" />
+  <style>
+    /* k-nav's own shadow CSS forces ::slotted(a) to display:inline-block, which beats
+       a plain class selector's display:inline-flex on specificity — so centering the
+       logo icon against the wordmark needs flex-shrink protection here instead, or a
+       narrow viewport compresses both the icon and the nav links' text down to
+       nothing trying to fit everything on one line. */
+    k-nav a[href="./"] { flex-shrink: 0; white-space: nowrap; }
+    k-nav img { flex-shrink: 0; object-fit: contain; }
+    @media (max-width: 640px) {
+      k-nav a:not([href="./"]):not([target]) { display: none; }
+    }
+  </style>
   <script>
     window.kempo = {
       pathToStylesheet: 'https://cdn.jsdelivr.net/npm/kempo-css@2/dist/kempo.min.css',
@@ -52,9 +64,32 @@
           re-filtered/toned, or watermarked.
         </p>
         <p>
-          <a href="https://github.com/dustinpoissant/image-deduper" class="btn primary mr" target="_blank">GitHub</a>
+          <a href="https://github.com/dustinpoissant/image-deduper/releases/latest/download/Image-Deduper-Setup.exe"
+            class="btn primary mr"><k-icon name="download" class="mrq"></k-icon> Download for Windows</a>
+          <a href="https://github.com/dustinpoissant/image-deduper" class="btn" target="_blank">GitHub</a>
         </p>
       </div>
+
+      <div class="b r p mb" style="border-color: var(--c_warning)">
+        <p class="m0">
+          <strong><k-icon name="warning" class="mrq"></k-icon> Before you install:</strong>
+          this app bundles a neural network (DINOv2, via ONNX Runtime) for the
+          crop/rotation/filter-resistant matching tier — the installed app is
+          <strong>~1.5GB</strong>, not a typical few-MB installer. Everything runs
+          fully offline; the model ships with the app and nothing is uploaded anywhere.
+        </p>
+      </div>
+
+      <section id="requirements" class="mb">
+        <h2>System requirements</h2>
+        <ul class="mb">
+          <li><strong>OS</strong> — Windows 10/11, 64-bit (x64). No installer for mac/Linux yet.</li>
+          <li><strong>Disk space</strong> — ~1.5GB free for the install.</li>
+          <li><strong>RAM</strong> — 4GB+ recommended.</li>
+          <li><strong>GPU</strong> — optional. A DirectX 12-capable GPU speeds up the neural
+            tier (DirectML); without one it automatically falls back to CPU.</li>
+        </ul>
+      </section>
 
       <section id="how-it-works" class="mb">
         <h2>How it works — a 3-tier hybrid engine</h2>
