@@ -5,6 +5,8 @@ import { shared } from '/lib/styles.js';
 import { thumbnail, fmtBytes } from '/lib/engine.js';
 import { getConfig } from '/lib/contexts.js';
 import CompareViewer from './CompareViewer.js';
+import './ImageCard.js';
+import './Scores.js';
 
 /*
   Utility Functions
@@ -15,9 +17,12 @@ const formatRank = name => {
   const idx = FORMAT_PRIORITY.indexOf((name.split('.').pop() || '').toLowerCase());
   return idx === -1 ? FORMAT_PRIORITY.length : idx;
 };
+// Screenshots are often higher-resolution than the original (the device they were
+// taken on outscales the source), which would otherwise win the "keep" slot on
+// resolution alone — this catches that before resolution is even compared.
+const isScreenshot = name => /screenshot/i.test(name);
 
-const TILE_SIZES = { small: 140, medium: 220, large: 320 };
-const TIER_ICON = { phash: 'tag', nn: 'network_intelligence', geo: 'shapes' };
+const TILE_SIZES = { small: 220, medium: 320, large: 420 };
 
 /*
   Symbols
@@ -30,14 +35,13 @@ const orderedMembers = Symbol('orderedMembers');
 const openViewer = Symbol('openViewer');
 const wireViewerDelete = Symbol('wireViewerDelete');
 const autoDelete = Symbol('autoDelete');
-const signals = Symbol('signals');
 const toggleSelect = Symbol('toggleSelect');
 const deleteSelected = Symbol('deleteSelected');
 const notDuplicates = Symbol('notDuplicates');
 const compareEnabled = Symbol('compareEnabled');
 const compareSelected = Symbol('compareSelected');
 
-export default class DupDetail extends ShadowComponent {
+export default class Detail extends ShadowComponent {
   /*
     Reactive Properties / Attributes
   */
@@ -119,16 +123,23 @@ export default class DupDetail extends ShadowComponent {
     };
 
     // Keep the highest-resolution image (ties broken by most-lossless format, then
-    // smallest file size, then alphabetically), and ask to delete the rest.
+    // smallest file size, then alphabetically), and ask to delete the rest. Unless
+    // disabled, a screenshot loses to any non-screenshot regardless of resolution —
+    // see isScreenshot's comment.
     this[autoDelete] = async () => {
       const g = this.group;
       if (!g || g.members.length < 2) return;
+      const deprioritizeScreenshots = this.settings.deprioritizeScreenshots;
 
       const ranked = (await Promise.all(g.members.map(async mi => {
         const it = this.items[mi];
         const t = await thumbnail(it.path, 480);
         return { path: it.path, name: it.name, size: it.size, area: (t?.width && t?.height) ? t.width * t.height : 0 };
       }))).sort((a, b) => {
+        if (deprioritizeScreenshots) {
+          const sa = isScreenshot(a.name), sb = isScreenshot(b.name);
+          if (sa !== sb) return sa ? 1 : -1;
+        }
         if (b.area !== a.area) return b.area - a.area;
         const fa = formatRank(a.name), fb = formatRank(b.name);
         if (fa !== fb) return fa - fb;
@@ -142,14 +153,6 @@ export default class DupDetail extends ShadowComponent {
         bubbles: true, composed: true
       }));
     };
-
-    // Per-tier scores: icon + %, separated by | . Green (tc-success) if that tier
-    // contributed to the grouping, muted otherwise. Mirrors DupResults.js.
-    this[signals] = g => html`<span class="sigs d-if ai-c">${g.signals.map((sig, k) => html`
-      ${k ? html`<span class="tc-muted mxq">|</span>` : ''}
-      <span class="d-if ai-c ${sig.contributed ? 'tc-success' : 'tc-muted'}">
-        <k-icon name=${TIER_ICON[sig.tier]} class="mrq"></k-icon>${Math.round(sig.score * 100)}%
-      </span>`)}</span>`;
 
     this[toggleSelect] = (path, checked) => {
       const next = new Set(this.selected);
@@ -220,40 +223,33 @@ export default class DupDetail extends ShadowComponent {
     this[cfg]?.removeEventListener('context:set', this.onConfigChange);
   }
 
-  // Lit reuses card DOM across selections, so reload whenever a card's path changes
-  // (clearing the stale image immediately to avoid showing the previous set's pic).
+  // Clear the checkbox selection whenever the actual set of members changes (not on
+  // every recluster — same members just get reordered/rescored). Each id-image-card
+  // loads its own thumbnail.
   updated(changedProperties) {
     if (changedProperties.has('group')) {
-      // Clear the checkbox selection whenever the actual set of members changes
-      // (not on every recluster — same members just get reordered/rescored).
       const key = this.group ? this.group.members.map(mi => this.items[mi]?.path).join('|') : '';
       if (key !== this[selKey]) this.selected = new Set();
       this[selKey] = key;
     }
-
-    this.renderRoot.querySelectorAll('.imgcard').forEach(async card => {
-      const path = card.dataset.path;
-      if (card._loadedPath === path) return;
-      card._loadedPath = path;
-      const img = card.querySelector('.pic');
-      img.removeAttribute('src');
-      card.querySelector('.dims').textContent = '—';
-      const t = await thumbnail(path, 480);
-      if (card._loadedPath !== path) return; // selection changed again mid-load
-      if (t?.dataUrl) img.src = t.dataUrl;
-      if (t?.width) card.querySelector('.dims').textContent = `${t.width} × ${t.height}`;
-    });
   }
 
   /*
     Protected Members
   */
-  get settings() { return this[cfg]?.get('settings') ?? { thumbSize: 'medium' }; }
+  get settings() { return this[cfg]?.get('settings') ?? { thumbSize: 'medium', deprioritizeScreenshots: true }; }
 
   /*
     Event Handlers
   */
   onConfigChange = e => { if (e.detail.key === 'settings') this.requestUpdate(); };
+  // The card knows only its path; map it back to a position in the ordered members
+  // to open the gallery on the right photo.
+  onCardView = e => {
+    const idx = this[orderedMembers]().findIndex(mi => this.items[mi].path === e.detail.path);
+    if (idx !== -1) this[openViewer](idx);
+  };
+  onCardToggle = e => this[toggleSelect](e.detail.path, e.detail.checked);
 
   /*
     Public Methods
@@ -281,7 +277,7 @@ export default class DupDetail extends ShadowComponent {
     return html`
       <div class="pane">
         <div class="row ai-c jc-b mb">
-          <h3 class="m0">${g.members.length} images <span class="tc-muted">|</span> ${this[signals](g)}</h3>
+          <h3 class="m0">${g.members.length} images <span class="tc-muted">|</span> <id-scores .scores=${g.signals}></id-scores></h3>
         </div>
         <div class="row ai-c bb pb mb">
           <button class="danger mrh" @click=${() => this[autoDelete]()}><k-icon name="delete_auto"></k-icon> Auto Delete</button>
@@ -303,41 +299,23 @@ export default class DupDetail extends ShadowComponent {
           </div>
         </div>
         <div class="grid-fill" style="--col-min: ${TILE_SIZES[this.settings.thumbSize] || TILE_SIZES.medium}px">
-          ${this[orderedMembers]().map((mi, idx) => {
+          ${this[orderedMembers]().map(mi => {
             const it = this.items[mi];
-            return html`
-              <div class="imgcard b r ovf-h" data-path=${it.path}>
-                ${it.ref ? html`<span class="ref-badge" title="Reference image">REF</span>` : ''}
-                <img class="pic" @click=${() => this[openViewer](idx)}>
-                <div class="ph">
-                  <div class="row"><strong class="ellipsis" title=${it.name}>${it.name}</strong></div>
-                  <div class="tc-muted small dims">—</div>
-                  <div class="tc-muted small">${fmtBytes(it.size)}</div>
-                  <div class="tc-muted small ellipsis" title=${it.path}>${it.path}</div>
-                </div>
-                <div class="row ai-c ph bt">
-                  <input type="checkbox" class="sel mrh" .checked=${this.selected.has(it.path)}
-                    @change=${e => this[toggleSelect](it.path, e.target.checked)}>
-                  <button class="col mrh" @click=${() => this[act]('open', it.path)}><k-icon name="photo"></k-icon></button>
-                  <button class="col mrh" @click=${() => this[act]('reveal', it.path)}><k-icon name="folder_open"></k-icon></button>
-                  <button class="col danger" @click=${() => this[act]('trash', it.path)}><k-icon name="delete"></k-icon></button>
-                </div>
-              </div>`;
+            return html`<id-image-card .item=${it} .checked=${this.selected.has(it.path)}
+              @card-view=${this.onCardView} @card-toggle=${this.onCardToggle}></id-image-card>`;
           })}
         </div>
       </div>`;
   }
 
-  // Only what kempo-css can't express: tabular-nums + vertical-align for the inline score
-  // widgets, the tile's relative positioning + fixed aspect-ratio image, the
-  // absolutely-positioned REF badge, and the grid-centered empty state.
+  // Only the grid-centered empty state; the tiles and score widget bring their own styles.
   static styles = [shared, css`
-    .sigs { font-variant-numeric: tabular-nums; vertical-align: middle; }
-    .imgcard { position: relative; }
-    .ref-badge { position: absolute; top: var(--spacer_q); left: var(--spacer_q); z-index: 1; padding: 0 var(--spacer_q); font-size: var(--fs_small); font-weight: var(--fw_bold); letter-spacing: .03em; border-radius: var(--radius); background: var(--c_primary); color: var(--tc_on_primary, #fff); }
-    .pic { aspect-ratio: 4 / 3; object-fit: contain; background: #0003; width: 100%; cursor: pointer; }
-    .center-empty { height: 100%; display: grid; place-items: center; }
+    .center-empty {
+      height: 100%;
+      display: grid;
+      place-items: center;
+    }
   `];
 }
 
-customElements.define('dup-detail', DupDetail);
+customElements.define('id-detail', Detail);

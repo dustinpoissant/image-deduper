@@ -4,9 +4,9 @@ import Dialog from '/modules/kempo-ui/dist/components/Dialog.js';
 import { shared } from '/lib/styles.js';
 import api from '/lib/api.js';
 import { getConfig, getUI } from '/lib/contexts.js';
-import './DupControls.js';
-import './DupResults.js';
-import './DupDetail.js';
+import './Controls.js';
+import './Results.js';
+import './Detail.js';
 import {
   initCache, selectIn, bulkUpsert, embToB64, b64ToEmb, clearCache, removeFromCache,
   buildCandidatePairs, clusterPairs, remapOrb, OrbMatcher, pairKey, markNotDuplicates, getExcludedPairs
@@ -20,7 +20,7 @@ const confirmDialog = (text, opts = {}) => new Promise(res => Dialog.confirm(tex
 const alertDialog = (text, opts = {}) => new Promise(res => Dialog.alert(text, res, opts));
 const errorDialog = (text, opts = {}) => new Promise(res => Dialog.error(text, res, opts));
 
-const DEFAULT_SETTINGS = { recursive: true, usePhash: true, useNN: true, useGeo: true, preferGPU: true, confirmDelete: true, maxGroupSize: 10, thumbSize: 'medium' };
+const DEFAULT_SETTINGS = { recursive: true, usePhash: true, useNN: true, useGeo: true, preferGPU: true, confirmDelete: true, maxGroupSize: 10, thumbSize: 'medium', deprioritizeScreenshots: true };
 // Per-tier match thresholds (%). Neural defaults high so it groups only
 // near-identical images, not "same subject" look-alikes.
 const DEFAULT_THRESHOLDS = { phash: 70, nn: 90, geo: 55 };
@@ -43,7 +43,7 @@ const trashPaths = Symbol('trashPaths');
 const removeItem = Symbol('removeItem');
 const showKeyboardControls = Symbol('showKeyboardControls');
 
-export default class DupApp extends ShadowComponent {
+export default class App extends ShadowComponent {
   /*
     Reactive Properties / Attributes
   */
@@ -140,7 +140,7 @@ export default class DupApp extends ShadowComponent {
     this[syncViewerToSelection] = async () => {
       if (!document.querySelector('k-photo-viewer[fullscreen]')) return;
       await this.updateComplete;
-      this.shadowRoot.querySelector('dup-detail')?.openFirst();
+      this.shadowRoot.querySelector('id-detail')?.openFirst();
     };
 
     // Shared multi-file trash flow: a single confirm (respecting the confirmDelete
@@ -231,7 +231,7 @@ export default class DupApp extends ShadowComponent {
   */
   // titlebar.html lives outside this component (injected into the same document by
   // kempo-app's shell), so it reaches us via a plain document-level CustomEvent
-  // rather than a bubbling shadow-DOM event. The k-context elements wrap <dup-app> in
+  // rather than a bubbling shadow-DOM event. The k-context elements wrap <id-app> in
   // the page, so we resolve them across the shadow boundary with closestAcrossShadow.
   connectedCallback() {
     super.connectedCallback();
@@ -431,7 +431,7 @@ export default class DupApp extends ShadowComponent {
   */
   onMenuAction = e => {
     const { value } = e.detail;
-    const controls = this.shadowRoot.querySelector('dup-controls');
+    const controls = this.shadowRoot.querySelector('id-controls');
     if (value === 'add-folder') controls?.addFolderTo('both');
     else if (value === 'add-images') controls?.addImagesTo('both');
     else if (value === 'reload-app') location.reload();
@@ -475,7 +475,7 @@ export default class DupApp extends ShadowComponent {
     if (target?.isContentEditable) return;
     if (path.some(el => el?.tagName === 'K-DIALOG')) return;
     if (!this.groups.find(g => g.id === this.selectedId)) return;
-    const detail = this.shadowRoot.querySelector('dup-detail');
+    const detail = this.shadowRoot.querySelector('id-detail');
     const viewerOpen = !!document.querySelector('k-photo-viewer[fullscreen]');
     if (e.key === 'Enter') {
       detail?.openFirst();
@@ -582,18 +582,18 @@ export default class DupApp extends ShadowComponent {
     const selGroup = this.groups.find(g => g.id === this.selectedId) || null;
     return html`
       <k-split persistent-id="dup-outer" grip style="height:calc(100vh - var(--app-titlebar-height, 0px)); --pane_1_size:25%;">
-        <dup-controls
+        <id-controls
           .scanning=${this.scanning} .progress=${this.progress}
           @start-scan=${this.onStartScan} @cancel-scan=${this.onCancelScan} @clear-cache=${this.onClearCache}
-          @reset-settings=${this.onResetSettings}></dup-controls>
+          @reset-settings=${this.onResetSettings}></id-controls>
 
         <k-split slot="right" persistent-id="dup-inner" grip style="height:100%; --pane_1_size:33.333%;">
-          <dup-results
-            .groups=${this.groups} .items=${this.items} .summary=${this.lastScan} .scanning=${this.scanning}></dup-results>
-          <dup-detail slot="right"
+          <id-results
+            .groups=${this.groups} .items=${this.items} .summary=${this.lastScan} .scanning=${this.scanning}></id-results>
+          <id-detail slot="right"
             .group=${selGroup} .items=${this.items}
             @file-action=${this.onFileAction} @auto-delete=${this.onAutoDelete}
-            @delete-selected=${this.onDeleteSelected} @not-duplicates=${this.onNotDuplicates}></dup-detail>
+            @delete-selected=${this.onDeleteSelected} @not-duplicates=${this.onNotDuplicates}></id-detail>
         </k-split>
       </k-split>`;
   }
@@ -601,4 +601,4 @@ export default class DupApp extends ShadowComponent {
   static styles = [shared];
 }
 
-customElements.define('dup-app', DupApp);
+customElements.define('id-app', App);

@@ -84,21 +84,75 @@ export default class CompareViewer extends ShadowComponent {
       </div>`;
   }
   static styles = css`
-    :host { display: block; }
-    .overlay {
-      position: fixed; inset: 0; z-index: 80;
-      background: rgba(0,0,0,0.9);
-      display: flex; align-items: center; justify-content: center;
-      padding: 2rem; cursor: col-resize;
+    :host {
+      display: block;
     }
-    .frame { position: relative; max-width: 100%; max-height: 100%; line-height: 0; }
-    .img { display: block; max-width: 100%; max-height: 85vh; object-fit: contain; user-select: none; pointer-events: none; width: 100%; height: 100%; }
-    .clipped { position: absolute; inset: 0; }
-    .divider { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; transform: translateX(-1px); pointer-events: none; }
-    .label { position: absolute; top: var(--spacer_h); color: #fff; background: rgba(0,0,0,.6); padding: var(--spacer_q) var(--spacer_h); border-radius: var(--radius); font-size: var(--fs_small); pointer-events: none; }
-    .label.left { left: var(--spacer_h); }
-    .label.right { right: var(--spacer_h); }
-    .close { position: absolute; top: var(--spacer); right: var(--spacer); z-index: 1; background: none; border: none; color: #fff; cursor: pointer; }
+    .overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 80;
+      background: rgba(0,0,0,0.9);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+      cursor: col-resize;
+    }
+    .frame {
+      position: relative;
+      max-width: 100%;
+      max-height: 100%;
+      line-height: 0;
+    }
+    .img {
+      display: block;
+      max-width: 100%;
+      max-height: 85vh;
+      object-fit: contain;
+      user-select: none;
+      pointer-events: none;
+      width: 100%;
+      height: 100%;
+    }
+    .clipped {
+      position: absolute;
+      inset: 0;
+    }
+    .divider {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: #fff;
+      transform: translateX(-1px);
+      pointer-events: none;
+    }
+    .label {
+      position: absolute;
+      top: var(--spacer_h);
+      color: #fff;
+      background: rgba(0,0,0,.6);
+      padding: var(--spacer_q) var(--spacer_h);
+      border-radius: var(--radius);
+      font-size: var(--fs_small);
+      pointer-events: none;
+    }
+    .label.left {
+      left: var(--spacer_h);
+    }
+    .label.right {
+      right: var(--spacer_h);
+    }
+    .close {
+      position: absolute;
+      top: var(--spacer);
+      right: var(--spacer);
+      z-index: 1;
+      background: none;
+      border: none;
+      color: #fff;
+      cursor: pointer;
+    }
   `;
 
   /*
@@ -116,7 +170,7 @@ export default class CompareViewer extends ShadowComponent {
     container.style.overflow = 'hidden';
     container.style.zIndex = '80';
 
-    const viewer = document.createElement('compare-viewer');
+    const viewer = document.createElement('id-compare-viewer');
     viewer.leftSrc = leftSrc;
     viewer.rightSrc = rightSrc;
     viewer.leftLabel = leftLabel || '';
@@ -139,4 +193,4 @@ export default class CompareViewer extends ShadowComponent {
   }
 }
 
-customElements.define('compare-viewer', CompareViewer);
+customElements.define('id-compare-viewer', CompareViewer);

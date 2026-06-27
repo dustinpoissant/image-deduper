@@ -2,14 +2,14 @@
 
 ## Overview
 
-**img-dup-detector** is an Electron desktop app that finds duplicate images even when they're cropped, rotated, scaled, filtered, recompressed, or watermarked. It's built on **kempo-app** (the Electron framework) and **kempo-ui** (Lit web components), both Dustin's own packages.
+**Image Deduper** is an Electron desktop app that finds duplicate images even when they're cropped, rotated, scaled, filtered, recompressed, or watermarked. It's built on **kempo-app** (the Electron framework) and **kempo-ui** (Lit web components), both Dustin's own packages.
 
 The detection engine is **3-tier**, runs entirely in-process (no Python), and caches aggressively in SQLite:
 1. **pHash** — perceptual hash; catches re-saves, rescales, 90° rotations, mirror flips.
 2. **Neural (DINOv2)** — `@huggingface/transformers`, GPU/DML when available; finds edited/filtered look-alikes (only used to *find candidates*).
 3. **Geometric (ORB)** — `@techstark/opencv-js`; keypoint+geometry match; the real "is this a copy" evidence (crops, rotations, watermarks).
 
-See the `img-dup-detector-engine` memory for engine gotchas.
+See the `image-deduper-engine` memory for engine gotchas.
 
 ## Running / Dev
 
@@ -26,7 +26,7 @@ Native deps (`sharp`, `better-sqlite3`, `@techstark/opencv-js`) are already buil
 `npm run dev` exposes CDP on **port 9222**:
 
 ```sh
-curl http://localhost:9222/json/list     # renderer target title = "Image Duplicate Detector"
+curl http://localhost:9222/json/list     # renderer target title = "Image Deduper"
 ```
 
 Connect any CDP client to the target's `webSocketDebuggerUrl` to evaluate JS, read console,
@@ -37,16 +37,23 @@ take screenshots, or drive clicks. `npm run interact -- <cmd>` is the higher-lev
 ## Architecture
 
 ```
-app.js                  Renderer entry — registers kempo-ui components + DupApp
-pages/index.html        <k-context>s wrapping <dup-app> (app-level state)
+app.js                  Renderer entry — registers kempo-ui components + App
+pages/index.html        <k-context>s wrapping <id-app> (app-level state)
 shell.html              kempo-app shell (<app-page>)
 titlebar.html           Menu → dispatches document 'menu-action' events
 theme.css               kempo-css variable overrides
-components/              Web components (one per file, PascalCase, default export)
-  DupApp.js             Orchestrator: scan pipeline + results, owns engine state
-  DupControls.js        Left pane: sources, detection tiers, settings
-  DupResults.js         Middle pane: duplicate-set list
-  DupDetail.js          Right pane: images of the selected set + actions
+components/              Web components (one per file, PascalCase, default export, <id-*> tags)
+  App.js                Orchestrator: scan pipeline + results, owns engine state
+  Controls.js           Left pane: sources, detection tiers, settings
+  Results.js            Middle pane: duplicate-set list
+  Detail.js             Right pane: images of the selected set + actions
+  Dupe.js               One duplicate-set row in Results (owns its thumbnail)
+  ImageCard.js          One image tile in Detail (owns its thumbnail)
+  Scores.js             Per-tier % score widget, shared by Dupe + Detail's header
+  SourceCard.js         Reference/Search import card in Controls
+  SourceItem.js         One source path row inside a SourceCard
+  ToggleSlider.js       Enable-toggle + threshold slider/input, one per detection tier
+  SliderInput.js        Slider + editable number box (threshold % or integer settings)
   CompareViewer.js      Fullscreen wipe-compare overlay
 lib/
   engine.js             Clustering, caching, ORB matcher, thumbnails (renderer side)
@@ -87,7 +94,7 @@ state only when `render()` must react, otherwise a symbol.
 
 ## Dependency chain & updating
 
-`kempo-ui` → `kempo-app` → `img-dup-detector`. To pull a new kempo-ui through:
+`kempo-ui` → `kempo-app` → `image-deduper`. To pull a new kempo-ui through:
 1. Publish kempo-ui, then in kempo-app `npm install kempo-ui@^X`, commit/push (auto-publishes).
 2. Here: `npm install kempo-app@^Y kempo-ui@^X --ignore-scripts`.
 

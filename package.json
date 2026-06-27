@@ -1,12 +1,12 @@
 {
-  "name": "img-dup-detector",
+  "name": "image-deduper",
   "version": "0.1.0",
   "description": "Find duplicate images even when cropped, rotated, scaled, filtered, or watermarked.",
   "type": "module",
   "kempo-app": {
-    "appName": "Image Duplicate Detector",
+    "appName": "Image Deduper",
     "appIcon": "media/icon.png",
-    "protocolName": "img-dup-detector",
+    "protocolName": "imagededuper",
     "shell": "shell.html",
     "pages": "pages"
   },
@@ -14,13 +14,15 @@
     "start": "kempo-app",
     "dev": "kempo-app --dev",
     "interact": "kempo-interact",
-    "test": "kempo-test"
+    "test": "kempo-test",
+    "package": "kempo-app --package",
+    "make": "kempo-app --make"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",
     "@techstark/opencv-js": "4.12.0-release.1",
     "better-sqlite3": "^12.11.1",
-    "kempo-app": "^0.0.26",
+    "kempo-app": "^0.0.27",
     "kempo-css": "latest",
     "kempo-ui": "^0.4.28",
     "sharp": "^0.35.0"

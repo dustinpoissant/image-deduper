@@ -1,12 +1,14 @@
 import ShadowComponent from '/modules/kempo-ui/dist/components/ShadowComponent.js';
 import { html, css } from '/modules/kempo-ui/dist/lit-all.min.js';
-import '/modules/kempo-ui/dist/components/Slider.js';
 import '/modules/kempo-ui/dist/components/Toggle.js';
 import '/modules/kempo-ui/dist/components/Progress.js';
 import '/modules/kempo-ui/dist/components/Accordion.js';
 import { shared } from '/lib/styles.js';
 import { getConfig } from '/lib/contexts.js';
 import api from '/lib/api.js';
+import './SourceCard.js';
+import './ToggleSlider.js';
+import './SliderInput.js';
 
 /*
   Symbols
@@ -15,29 +17,21 @@ const cfg = Symbol('cfg');
 const emit = Symbol('emit');
 const setSetting = Symbol('setSetting');
 const setThreshold = Symbol('setThreshold');
-const editThreshold = Symbol('editThreshold');
-const commitThreshold = Symbol('commitThreshold');
-const commitMaxGroup = Symbol('commitMaxGroup');
 const addImages = Symbol('addImages');
 const addFolder = Symbol('addFolder');
 const addSources = Symbol('addSources');
 const removeSource = Symbol('removeSource');
 const toggleRow = Symbol('toggleRow');
-const sliderRow = Symbol('sliderRow');
 const tier = Symbol('tier');
-const sourceCard = Symbol('sourceCard');
 
-export default class DupControls extends ShadowComponent {
+export default class Controls extends ShadowComponent {
   /*
     Reactive Properties / Attributes
   */
   static properties = {
     // Transient scan state, owned by the app and passed down.
     scanning: { type: Boolean },
-    progress: { type: Object },
-    // Which tier's value box is being typed in: the input shows a bare number while
-    // focused, the % suffix otherwise — so render reacts to this.
-    editingTier: { state: true }
+    progress: { type: Object }
   };
 
   /*
@@ -60,21 +54,6 @@ export default class DupControls extends ShadowComponent {
     // notifies every listener, including the app for re-clustering).
     this[setSetting] = (key, value) => this[cfg]?.set('settings', { ...this.settings, [key]: value });
     this[setThreshold] = (t, value) => this[cfg]?.set('thresholds', { ...this.thresholds, [t]: value });
-
-    this[editThreshold] = t => { this.editingTier = t; };
-
-    // Clamp/round to the slider's range, write it, then drop back to the %-suffixed
-    // display (editingTier → null re-renders the input).
-    this[commitThreshold] = (t, raw) => {
-      this.editingTier = null;
-      const n = parseFloat(raw);
-      this[setThreshold](t, Number.isFinite(n) ? Math.min(99, Math.max(1, Math.round(n))) : Math.round(this.thresholds[t]));
-    };
-
-    this[commitMaxGroup] = raw => {
-      const n = parseFloat(raw);
-      this[setSetting]('maxGroupSize', Number.isFinite(n) ? Math.min(30, Math.max(2, Math.round(n))) : Math.round(this.settings.maxGroupSize));
-    };
 
     // Native pickers run in the main process via the shared api, then the chosen paths
     // are merged into the sources config. Adding never clears results (the app only
@@ -112,60 +91,23 @@ export default class DupControls extends ShadowComponent {
         <span class="mlh">${label}</span>
       </div>`;
 
-    // The slider + editable value box shared by every threshold and the max-group setting.
-    this[sliderRow] = (slider, input, mt = false) => html`<div class="row ai-c nowrap ${mt ? 'mt' : ''}">${slider}${input}</div>`;
-
     // A detection tier as an accordion section: icon + name in the header; description,
     // enable toggle and threshold slider revealed inside the panel.
     this[tier] = (key, t, icon, label, desc) => {
       const off = !this.settings[key];
-      const display = this.editingTier === t ? String(Math.round(this.thresholds[t])) : `${Math.round(this.thresholds[t])}%`;
       return html`
         <k-accordion-header for-panel=${t} class="row ai-c ph ${off ? 'tier-off' : ''}">
           <k-icon name=${icon} class="mrh mlq"></k-icon><strong class=${off ? 'td-lt' : ''}>${label}</strong>
         </k-accordion-header>
         <k-accordion-panel name=${t}>
           <div class="ph">
-            <p class="tc-muted small m0">${desc}</p>
-            ${this[toggleRow](key, 'Enable ' + label)}
-            ${this[sliderRow](
-              html`<k-slider class="col d-b ml" min="1" max="99" tooltip format="0%" .value=${String(this.thresholds[t])}
-                @change=${e => this[setThreshold](t, Number(e.target.value))}></k-slider>`,
-              html`<input type="text" inputmode="numeric" class="thresh-val mlh" .value=${display}
-                @focus=${e => { this[editThreshold](t); e.target.select(); }}
-                @blur=${e => this[commitThreshold](t, e.target.value)}
-                @keydown=${e => { if (e.key === 'Enter') e.target.blur(); }}>`,
-              true
-            )}
+            <p class="tc-muted small mbh">${desc}</p>
+            <id-toggle-slider label=${'Enable ' + label} .checked=${this.settings[key]} min="1" max="99"
+              .value=${this.thresholds[t]} format="percent"
+              @toggle=${e => this[setSetting](key, e.detail.checked)}
+              @change=${e => this[setThreshold](t, e.detail.value)}></id-toggle-slider>
           </div>
         </k-accordion-panel>`;
-    };
-
-    // A non-collapsible import card for one role, styled to match the detection-tier
-    // accordion. Two header buttons add individual images or a whole folder to that set;
-    // the body lists its sources. `mt` spaces it from the previous card (every call
-    // site but the first passes it).
-    this[sourceCard] = (set, title, hint, mt = false) => {
-      const list = this.sources[set] || [];
-      return html`
-        <div class="b r ${mt ? 'mt' : ''}">
-          <div class="row ai-c ph bb">
-            <strong class="card-title col">${title}</strong>
-            <span class="btn-grp">
-              <button class="b pq tc-default" style="background:transparent!important" title="Add image(s)" @click=${() => this[addImages](set)}><k-icon name="photo_add"></k-icon></button>
-              <button class="b pq tc-default" style="background:transparent!important" title="Add folder" @click=${() => this[addFolder](set)}><k-icon name="folder_add"></k-icon></button>
-            </span>
-          </div>
-          <div class="ph">
-            <p class="tc-muted small m0">${hint}</p>
-            ${list.length ? list.map((s, i) => html`
-              <div class="row ai-c nowrap mt">
-                <k-icon class="tc-muted mrh" name=${s.kind === 'file' ? 'photo' : 'folder_open'}></k-icon>
-                <span class="col ellipsis" title=${s.path}>${s.path.split(/[\\/]/).filter(Boolean).pop() || s.path}</span>
-                <button class="no-btn tc-muted mlh" title="Remove" @click=${() => this[removeSource](set, i)}>&times;</button>
-              </div>`) : html`<div class="tc-muted small mt">Nothing added yet</div>`}
-          </div>
-        </div>`;
     };
 
     /*
@@ -173,7 +115,6 @@ export default class DupControls extends ShadowComponent {
     */
     this.scanning = false;
     this.progress = null;
-    this.editingTier = null;
   }
 
   /*
@@ -218,8 +159,16 @@ export default class DupControls extends ShadowComponent {
     return html`
       <div class="pane bg-alt">
 
-        ${this[sourceCard]('reference', 'Reference Images', 'Known-good images — not compared to each other')}
-        ${this[sourceCard]('search', 'Search Images', 'Images checked against the references', true)}
+        <id-source-card label="Reference Images" hint="Known-good images — not compared to each other"
+          .sources=${this.sources.reference}
+          @add-images=${() => this[addImages]('reference')}
+          @add-folder=${() => this[addFolder]('reference')}
+          @remove=${e => this[removeSource]('reference', e.detail.index)}></id-source-card>
+        <id-source-card class="mt" label="Search Images" hint="Images checked against the references"
+          .sources=${this.sources.search}
+          @add-images=${() => this[addImages]('search')}
+          @add-folder=${() => this[addFolder]('search')}
+          @remove=${e => this[removeSource]('search', e.detail.index)}></id-source-card>
 
         <div class="mt">
           <h5 class="mbh">Detection Algorithms</h5>
@@ -242,17 +191,11 @@ export default class DupControls extends ShadowComponent {
               ${this[toggleRow]('recursive', 'Include subfolders', false)}
               ${this[toggleRow]('preferGPU', 'Use GPU if available')}
               ${this[toggleRow]('confirmDelete', 'Confirm deletion')}
+              ${this[toggleRow]('deprioritizeScreenshots', 'Auto Delete: prefer to keep originals over screenshots')}
               <div class="mt">
                 <span class="d-b mbq">Max images per dupe set</span>
-                ${this[sliderRow](
-                  html`<k-slider class="col d-b" min="2" max="30" tooltip .value=${String(this.settings.maxGroupSize)}
-                    @change=${e => this[setSetting]('maxGroupSize', Number(e.target.value))}></k-slider>`,
-                  html`<input type="text" inputmode="numeric" class="thresh-val mlh"
-                    .value=${String(Math.round(this.settings.maxGroupSize))}
-                    @focus=${e => e.target.select()}
-                    @blur=${e => this[commitMaxGroup](e.target.value)}
-                    @keydown=${e => { if (e.key === 'Enter') e.target.blur(); }}>`
-                )}
+                <id-slider-input min="2" max="30" .value=${this.settings.maxGroupSize} format="integer"
+                  @change=${e => this[setSetting]('maxGroupSize', e.detail.value)}></id-slider-input>
               </div>
               <div class="row mt">
                 <button class="danger small mrh" @click=${() => this[emit]('clear-cache')}>Clear cache</button>
@@ -273,12 +216,13 @@ export default class DupControls extends ShadowComponent {
       </div>`;
   }
 
-  // Shared utilities (.ai-c, .nowrap, .ovf-h …) cover the layout; only component-specific
-  // bits remain: the heading size, the disabled-tier dim, the toggle's component vars, and
-  // the borderless value input (which must beat kempo's input rule).
+  // Shared utilities (.ai-c, .ovf-h …) cover the layout; only component-specific bits
+  // remain: the heading size, the disabled-tier dim, and the toggle's component vars
+  // (the toggle-slider component carries its own copy for its own toggle instances).
   static styles = [shared, css`
-    .card-title { font-size: 1.15rem; }
-    .tier-off { opacity: .55; }
+    .tier-off {
+      opacity: .55;
+    }
     k-toggle {
       --switch_height: 1.35rem;
       --switch_width: 2.2rem;
@@ -286,16 +230,7 @@ export default class DupControls extends ShadowComponent {
       --handle_size__on: 1.05rem;
       margin-bottom: 0;
     }
-    .thresh-val {
-      display: inline-block !important; width: 2.6rem !important; flex: 0 0 auto;
-      font-variant-numeric: tabular-nums; font-weight: var(--fw_bold); text-align: right; color: inherit;
-      background: transparent !important; border: 1px solid transparent !important; padding: 0 var(--spacer_q) !important;
-      border-radius: var(--radius);
-    }
-    .thresh-val:not(:disabled):focus {
-      background: var(--input_bg) !important; border-color: var(--c_input_border) !important;
-    }
   `];
 }
 
-customElements.define('dup-controls', DupControls);
+customElements.define('id-controls', Controls);

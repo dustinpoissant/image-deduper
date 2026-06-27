@@ -1,4 +1,4 @@
-# Image Duplicate Detector
+# Image Deduper
 
 A desktop app (built on **kempo-app** / Electron) that finds duplicate images even when
 they have been **cropped, rotated, scaled, re-filtered/toned, or watermarked**.
