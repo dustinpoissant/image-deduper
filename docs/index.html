@@ -3,10 +3,20 @@
 <head>
 
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  />
   <title>Image Deduper</title>
-  <link rel="icon" type="image/png" href="./media/icon.png">
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/kempo-css@2/dist/kempo.min.css" />
+  <link
+    rel="icon"
+    type="image/png"
+    href="./media/icon.png"
+  >
+  <link
+    rel="stylesheet"
+    href="https://cdn.jsdelivr.net/npm/kempo-css@2/dist/kempo.min.css"
+  />
   <style>
     /* k-nav's own shadow CSS forces ::slotted(a) to display:inline-block, which beats
        a plain class selector's display:inline-flex on specificity — so centering the
@@ -18,30 +28,44 @@
       --radius: 0.5rem;
       --c_text: var(--tc);
     }
-    k-nav a[href="./"] { flex-shrink: 0; white-space: nowrap; }
-    k-nav img { flex-shrink: 0; object-fit: contain; }
+
+    k-nav a[href="./"] {
+      flex-shrink: 0;
+      white-space: nowrap;
+    }
+
+    k-nav img {
+      flex-shrink: 0;
+      object-fit: contain;
+    }
+
     @media (max-width: 640px) {
-      k-nav a:not([href="./"]):not([target]) { display: none; }
+      k-nav a:not([href="./"]):not([target]) {
+        display: none;
+      }
     }
   </style>
   <script>
     window.kempo = {
       pathToStylesheet: 'https://cdn.jsdelivr.net/npm/kempo-css@2/dist/kempo.min.css',
-      pathsToIcons: ['./icons','https://cdn.jsdelivr.net/npm/kempo-ui@0.4/icons']
+      pathsToIcons: ['./icons', 'https://cdn.jsdelivr.net/npm/kempo-ui@0.4/icons']
     };
   </script>
-
 </head>
 <body>
-
-  <k-nav fixed class="bg-primary">
+  <k-nav
+    fixed
+    class="bg-primary"
+  >
     <a href="#how-it-works">How it works</a>
     <a href="#reference-vs-search">Reference / Search</a>
-    <a href="#cache">Cache</a>
+    <a href="#cache">Re-scans</a>
     <a href="#auto-delete">Auto Delete</a>
-    <a href="#build">Build</a>
     <div class="flex"></div>
-    <a href="https://github.com/dustinpoissant/image-deduper" target="_blank"><k-icon name="github-mark"></k-icon></a>
+    <a
+      href="https://github.com/dustinpoissant/image-deduper"
+      target="_blank"
+    ><k-icon name="github-mark"></k-icon></a>
     <k-theme-switcher
       class="mr"
       style="
@@ -53,177 +77,184 @@
     ></k-theme-switcher>
   </k-nav>
   <div style="width: 100%; height: 4rem;"></div>
-
   <k-main>
     <main>
-
       <div class="ta-center mb">
-        <img src="./media/icon.png" alt="" width="256" height="256" class="mb" />
+        <img
+          src="./media/icon.png"
+          alt=""
+          width="256"
+          height="256"
+          class="mb"
+        />
         <h1 class="mt0 mbq">Image Deduper</h1>
         <p class="tc-muted">
-          Finds duplicate images even when they've been cropped, rotated, scaled,
-          re-filtered/toned, or watermarked.
+          Finds duplicate photos in your collection — even the sneaky ones that have
+          been cropped, rotated, resized, re-filtered, or watermarked.
         </p>
         <p>
-          <a href="https://github.com/dustinpoissant/image-deduper/releases/latest/download/Image-Deduper-Setup.exe"
-            class="btn primary mr"><k-icon name="windows" class="mrq"></k-icon> Download for Windows</a>
-          <a href="https://github.com/dustinpoissant/image-deduper" class="btn" target="_blank"><k-icon name="github-mark"></k-icon> GitHub</a>
+          <a
+            href="https://github.com/dustinpoissant/image-deduper/releases/latest/download/Image-Deduper-Setup.exe"
+            class="btn primary mr"
+          ><k-icon
+              name="windows"
+              class="mrq"
+            ></k-icon> Download for Windows</a>
+          <a
+            href="https://github.com/dustinpoissant/image-deduper"
+            class="btn"
+            target="_blank"
+          ><k-icon name="github-mark"></k-icon> GitHub</a>
         </p>
       </div>
 
       <div class="card">
-        <h5 class="tc-warning"><k-icon name="warning" class="mrq"></k-icon> Important Notice</h5>
+        <h5 class="tc-warning"><k-icon
+            name="warning"
+            class="mrq"
+          ></k-icon> Before you install</h5>
         <hr />
         <p>
-          This app contains an AI neural network (DINOv2, via ONNX Runtime) for duplicate image detection.<br />
+          Image Deduper has an AI model built in to spot duplicates that simple tools miss.
+          That's great for your privacy — <strong>everything runs locally on your machine,
+          nothing ever gets uploaded</strong> — but it comes with a real cost in disk space
+          and horsepower:
         </p>
-        <h6>Pros:</h6>
-        <ul>
-          <li>The app runs 100% offline.</li>
-          <li>No data is ever sent to any server.</li>
-          <li>100% privacy garenteed.</li>
+        <ul class="mb0">
+          <li><strong>~1.5GB install</strong> — the AI model ships inside the app.</li>
+          <li><strong>A dedicated GPU is recommended.</strong> It'll run on CPU only, but
+            expect scans to take a lot longer.</li>
+          <li><strong>Up to 4GB of RAM</strong> while a scan is running.</li>
         </ul>
-        <h6>Cons:</h6>
-        <ul>
-          <li>Very large app size — 1.5GB</li>
-          <li>Large system requirements</li>
-          <ul class="mb0">
-            <li>GPU Recommended, it can run on only CPU but is very slow.</li>
-            <li>Requires up to 4GB of free RAM just for this app.</li>
-          </ul>
-        </li>
       </div>
 
-      <section id="how-it-works" class="mb">
-        <h2>How it works — a 3-tier hybrid engine</h2>
+      <div class="ta-center px">
+        <img
+          src="./screenshot.png"
+          alt="A screenshot of the Image Deduper app showing a sports car and 3 duplicates detected that are rotated, flipped and filtered"
+          style="max-width: 100%"
+        />
+      </div>
+
+      <section
+        id="how-it-works"
+        class="mb"
+      >
+        <h2>How it works</h2>
+        <p>
+          Image Deduper checks every photo against the others in three passes, each one
+          smarter (and more expensive) than the last:
+        </p>
         <div class="table-wrapper mb">
           <table class="full">
             <thead>
               <tr>
-                <th>Tier</th>
-                <th>Tech</th>
-                <th>Catches</th>
-                <th>Cost</th>
+                <th>Pass</th>
+                <th>What it's good at</th>
               </tr>
             </thead>
             <tbody>
               <tr>
-                <td>1. Perceptual hash</td>
-                <td><code>sharp</code> + 32×32 DCT pHash (8 dihedral orientations)</td>
-                <td>exact dupes, rescales, recompression, 90° rotations &amp; mirrors</td>
-                <td>trivial</td>
+                <td><strong>1. Quick fingerprint</strong></td>
+                <td>Near-instant. Catches exact copies, re-saves, resizes, and simple
+                  90° rotations or mirror flips.</td>
               </tr>
               <tr>
-                <td>2. Neural embeddings</td>
-                <td>DINOv2 via <code>@huggingface/transformers</code> (native <code>onnxruntime-node</code>, GPU→CPU)</td>
-                <td><strong>crop, arbitrary rotation, scale, filters/tone, watermark</strong></td>
-                <td>one inference per image</td>
+                <td><strong>2. AI visual match</strong></td>
+                <td>The built-in neural network recognizes the <em>same photo</em> even
+                  after a crop, an arbitrary rotation, a filter, or a watermark.</td>
               </tr>
               <tr>
-                <td>3. Geometric verification</td>
-                <td>ORB + RANSAC homography via <code>@techstark/opencv-js</code></td>
-                <td>confirms true geometric overlap on borderline pairs</td>
-                <td>only borderline pairs</td>
+                <td><strong>3. Pixel-level confirmation</strong></td>
+                <td>For anything borderline from pass 2, lines up the actual pixels to
+                  confirm it's a real match before flagging it.</td>
               </tr>
             </tbody>
           </table>
         </div>
         <p>
-          Each tier has its own enable toggle and confidence threshold (left pane,
-          <strong>Detection Algorithms</strong>) — a pair links into a duplicate set if
-          <em>any</em> enabled tier clears its threshold.
+          Each pass can be turned on or off, and how strict it is can be tuned, from the
+          <strong>Detection Algorithms</strong> panel on the left. A pair of photos counts
+          as duplicates if <em>any</em> enabled pass is confident enough.
         </p>
       </section>
 
-      <section id="reference-vs-search" class="mb">
-        <h2>Reference vs. Search images</h2>
-        <p>Sources are split into two roles:</p>
+      <section
+        id="reference-vs-search"
+        class="mb"
+      >
+        <h2>Reference folders vs. Search folders</h2>
+        <p>You point Image Deduper at two kinds of folders:</p>
         <ul class="mb">
-          <li><strong>Reference</strong> — known-good images you trust, never compared to each other.</li>
-          <li><strong>Search</strong> — the images being checked against the references (and, with
-            no references at all, against each other — the simple "find dupes in this folder" case).</li>
+          <li><strong>Reference</strong> — your "known good" photos, the ones you already trust
+            and want to keep. These are never compared against each other, only used as the
+            yardstick for everything else.</li>
+          <li><strong>Search</strong> — the photos you actually want checked. Got no reference
+            folders at all? Search photos just get compared against each other instead — the
+            simple "find the dupes in this folder" case.</li>
         </ul>
         <p>
-          Because references are never compared to one another, two different references can never
-          end up merged into the same duplicate group — even if both happen to match the same
-          ambiguous search image, only the closer match keeps it.
+          Keeping references out of the comparison means two of your trusted photos can never get
+          incorrectly lumped together as duplicates of each other.
         </p>
       </section>
 
-      <section id="cache" class="mb">
-        <h2>Persistent cache (no re-scanning)</h2>
+      <section
+        id="cache"
+        class="mb"
+      >
+        <h2>Re-scans are fast</h2>
         <p>
-          Results are cached in SQLite (<code>better-sqlite3</code>, via kempo-app's DB, stored under
-          the app's userData dir) so re-scans only do <em>new</em> work:
+          Image Deduper remembers every photo it's already looked at, so you don't pay the cost
+          of a full scan every time. Add a handful of new photos to a folder you've scanned
+          before, and only those new photos get analyzed — everything else is pulled straight
+          from memory.
         </p>
-        <ul class="mb">
-          <li><code>images</code> — features (pHash + neural embedding) keyed by <strong>content
-            hash</strong> (SHA-256 of the bytes). Because identity is the content, a <strong>rename or
-            move is free</strong> — the features are reused.</li>
-          <li><code>paths</code> — <code>path → {size, mtime, hash}</code>, so unchanged files skip
-            re-hashing entirely.</li>
-          <li><code>orbcache</code> — the expensive geometric scores, keyed by the sorted
-            <strong>hash pair</strong>.</li>
-          <li><code>excluded_pairs</code> — hash pairs explicitly marked <strong>Not Duplicates</strong>,
-            so they (and anything transitively linked to them) never re-group on a later scan.</li>
-        </ul>
         <p>
-          Adding one image to a scanned folder computes features for just that image and only
-          compares it against the others; every prior comparison is loaded from cache. The results
-          header shows e.g. <code>12 files · 12 unique · features: 1 new / 11 cached · geometry: 4
-          new / 53 cached</code>. A <strong>Clear cache</strong> button resets it.
+          Renaming or moving a file you've already scanned doesn't trigger a re-scan either —
+          Image Deduper recognizes it's the same photo by its actual content, not its filename
+          or location. Mark a pair as <strong>Not Duplicates</strong> and it'll stay that way on
+          future scans too. If you ever want a clean slate, there's a <strong>Clear cache</strong>
+          button for that.
         </p>
       </section>
 
-      <section id="auto-delete" class="mb">
+      <section
+        id="auto-delete"
+        class="mb"
+      >
         <h2>Auto Delete</h2>
         <p>
-          Picks the image to keep per duplicate set — highest resolution first, ties broken by
-          most-lossless format, then smallest file size, then filename — and asks to delete the
-          rest. Filenames containing "screenshot" (any case) are deprioritized by default, since a
-          screenshot is often higher-resolution than the original purely because of the capturing
-          device, not because it's a better copy to keep (toggleable in Settings).
+          Found a set of duplicates and just want the best one kept? Auto Delete picks a winner
+          for you — the highest-resolution copy, with ties broken in favor of less-compressed
+          formats, then smaller file size — and asks you to confirm before deleting the rest.
         </p>
-      </section>
-
-      <section id="run" class="mb">
-        <h2>Run</h2>
-        <div class="b r mb p">
-          <pre><code>npm install
-npm run dev       # Electron + DevTools + CDP on port 9222
-# or
-npm start</code></pre>
-        </div>
         <p>
-          On the <strong>first</strong> scan with neural matching enabled, the DINOv2 model (~tens of
-          MB) is downloaded from the Hugging Face hub and cached. <code>better-sqlite3</code> v12
-          ships N-API prebuilds that load in Electron as-is — no native rebuild step needed.
-        </p>
-      </section>
-
-      <section id="build" class="mb">
-        <h2>Build</h2>
-        <div class="b r mb p">
-          <pre><code>npm run package   # dist/win-unpacked/ — runnable folder, no installer
-npm run make      # dist/*.exe — real NSIS installer wizard (Start Menu + Desktop shortcut)</code></pre>
-        </div>
-        <p>
-          Host OS/arch only, no cross-compiling. See
-          <a href="https://github.com/dustinpoissant/kempo-app" target="_blank">kempo-app</a>'s docs
-          for how packaging works under the hood.
+          Screenshots are skipped over by default when picking the winner, even if a screenshot
+          happens to be the highest-resolution file in the set. A screenshot's resolution usually
+          just reflects your screen size, not actual photo quality, so it's rarely the copy you
+          actually want to keep. You can turn this off in Settings.
         </p>
       </section>
 
     </main>
-    <div style="height:20vh"></div>
   </k-main>
-
-  <script type="module" src="https://cdn.jsdelivr.net/npm/kempo-ui@0.4/dist/components/Nav.js"></script>
-  <script type="module" src="https://cdn.jsdelivr.net/npm/kempo-ui@0.4/dist/components/Icon.js"></script>
-  <script type="module" src="https://cdn.jsdelivr.net/npm/kempo-ui@0.4/dist/components/ThemeSwitcher.js"></script>
+  <div style="height:33vh"></div>
+  <script
+    type="module"
+    src="https://cdn.jsdelivr.net/npm/kempo-ui@0.4/dist/components/Nav.js"
+  ></script>
+  <script
+    type="module"
+    src="https://cdn.jsdelivr.net/npm/kempo-ui@0.4/dist/components/Icon.js"
+  ></script>
+  <script
+    type="module"
+    src="https://cdn.jsdelivr.net/npm/kempo-ui@0.4/dist/components/ThemeSwitcher.js"
+  ></script>
 
   <script type="module">
-    document.addEventListener('click', function(e) {
+    document.addEventListener('click', function (e) {
       if (e.target.matches('a[href^="#"]')) {
         e.preventDefault();
         const targetId = e.target.getAttribute('href').replace('#', '');
