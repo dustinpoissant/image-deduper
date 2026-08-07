@@ -180,7 +180,9 @@ export default class Controls extends ShadowComponent {
             ${this[tier]('useNN', 'nn', 'network_intelligence', 'Neural look-alikes',
               'A neural network (DINOv2) measures visual similarity, so it can spot edited or filtered versions. It also rates different photos of the same subject as similar — keep the threshold high so it only groups near-identical images.')}
             ${this[tier]('useGeo', 'geo', 'shapes', 'Geometric (ORB)',
-              'Matches actual image content (keypoints + geometry), catching crops, rotations, scaling and watermarked copies of the same photo. The most reliable signal for true duplicates.')}
+              'Matches actual image content (keypoints + geometry), catching crops, rotations, scaling and watermarked copies of the same photo. Slow, since it compares each pair directly rather than reusing a per-image fingerprint.')}
+            ${this[tier]('useCopy', 'copy', 'content_copy', 'Copy detection',
+              'A model trained specifically to spot edited copies of one photo — crops, rotations, filters, watermarks — while deliberately NOT matching different photos of the same subject. Unlike Neural look-alikes, it won\'t flag the same person in a different outfit or location as a duplicate. The most accurate tier; leave it on unless you want its 98MB model skipped.')}
           </k-accordion>
         </div>
 
@@ -198,6 +200,12 @@ export default class Controls extends ShadowComponent {
                 <span class="d-b mbq">Max images per dupe set</span>
                 <id-slider-input min="2" max="30" .value=${this.settings.maxGroupSize} format="integer"
                   @change=${e => this[setSetting]('maxGroupSize', e.detail.value)}></id-slider-input>
+              </div>
+              <div class="mt">
+                <span class="d-b mbq">Set cohesion</span>
+                <p class="tc-muted small mbh">Every image in a set must be this similar to <em>every</em> other one, as a share of the thresholds above. Higher means tighter sets; 0% lets a set chain together through a middleman image that both halves match but that don't match each other.</p>
+                <id-slider-input min="0" max="100" .value=${Math.round((this.settings.cohesion ?? 0.5) * 100)} format="integer"
+                  @change=${e => this[setSetting]('cohesion', e.detail.value / 100)}></id-slider-input>
               </div>
               <div class="row mt">
                 <button class="danger small mrh" @click=${() => this[emit]('clear-cache')}>Clear cache</button>

@@ -1,6 +1,7 @@
 import ShadowComponent from '/modules/kempo-ui/dist/components/ShadowComponent.js';
 import { html } from '/modules/kempo-ui/dist/lit-all.min.js';
 import Dialog from '/modules/kempo-ui/dist/components/Dialog.js';
+import Toast from '/modules/kempo-ui/dist/components/Toast.js';
 import { shared } from '/lib/styles.js';
 import api from '/lib/api.js';
 import { getConfig, getUI } from '/lib/contexts.js';
@@ -9,7 +10,8 @@ import './Results.js';
 import './Detail.js';
 import {
   initCache, selectIn, bulkUpsert, embToB64, b64ToEmb, clearCache, removeFromCache,
-  buildCandidatePairs, clusterPairs, remapOrb, OrbMatcher, pairKey, markNotDuplicates, getExcludedPairs
+  buildCandidatePairs, clusterPairs, remapOrb, OrbMatcher, pairKey, markNotDuplicates, getExcludedPairs,
+  migrateExcludedPairs, gcCache, DEFAULT_COHESION
 } from '/lib/engine.js';
 
 /*
@@ -18,13 +20,13 @@ import {
 // kempo-ui Dialog wrapped as awaitable promises (no native alert/confirm).
 const confirmDialog = (text, opts = {}) => new Promise(res => Dialog.confirm(text, res, opts));
 const alertDialog = (text, opts = {}) => new Promise(res => Dialog.alert(text, res, opts));
-const errorDialog = (text, opts = {}) => new Promise(res => Dialog.error(text, res, opts));
 
-const DEFAULT_SETTINGS = { recursive: true, usePhash: true, useNN: true, useGeo: true, preferGPU: true, confirmDelete: true, maxGroupSize: 10, thumbSize: 'medium', deprioritizeScreenshots: true };
+const MODEL_NN = 'Xenova/dinov2-small';
+const DEFAULT_SETTINGS = { recursive: true, usePhash: true, useNN: true, useGeo: true, useCopy: true, preferGPU: true, confirmDelete: true, maxGroupSize: 10, cohesion: DEFAULT_COHESION, orbFloor: 0, orbCap: 20000, thumbSize: 'medium', deprioritizeScreenshots: true };
 // Per-tier match thresholds (%). Each tier's raw score is remapped (see lib/engine.js's
 // remapEmbed/remapPhash/remapOrb) so 50% lands exactly on that tier's real decision
 // boundary — the same default works for all three instead of needing separate tuning.
-const DEFAULT_THRESHOLDS = { phash: 50, nn: 50, geo: 50 };
+const DEFAULT_THRESHOLDS = { phash: 50, nn: 50, geo: 50, copy: 50 };
 
 /*
   Symbols
@@ -81,7 +83,18 @@ export default class App extends ShadowComponent {
     // defaults, migrating once from the pre-context localStorage key if it's there.
     this[seedConfig] = () => {
       const c = this[cfgEl];
-      if (!c || c.has('settings')) return;
+      if (!c) return;
+      // An existing config predates any setting added by a later version, and the getters
+      // return the persisted object as-is — so a new key would read `undefined` forever:
+      // its tier renders permanently off and its threshold arrives as NaN. Backfill only
+      // the missing keys, leaving everything the user has chosen untouched.
+      if (c.has('settings')) {
+        const missing = (defaults, cur) => Object.keys(defaults).some(k => !(k in (cur || {})));
+        const s = c.get('settings'), t = c.get('thresholds');
+        if (missing(DEFAULT_SETTINGS, s)) c.set('settings', { ...DEFAULT_SETTINGS, ...s });
+        if (missing(DEFAULT_THRESHOLDS, t)) c.set('thresholds', { ...DEFAULT_THRESHOLDS, ...t });
+        return;
+      }
       let old = {};
       try { old = JSON.parse(localStorage.getItem('dup-config') || '{}'); } catch { /* ignore corrupt config */ }
       c.set('settings', { ...DEFAULT_SETTINGS, ...(old.settings || {}) });
@@ -107,6 +120,7 @@ export default class App extends ShadowComponent {
       return {
         ...this.settings,
         tPhash: round1(t.phash) / 100,
+        tCopy: round1(t.copy) / 100,
         tNN: round1(t.nn) / 100,
         tGeo: round1(t.geo) / 100
       };
@@ -159,7 +173,7 @@ export default class App extends ShadowComponent {
 
       for (const path of paths) {
         const r = await api.fileAction('trash', path);
-        if (!r.ok) { await errorDialog('Could not delete the file: ' + (r.error || 'unknown error')); return; }
+        if (!r.ok) { Toast.error('Could not delete the file: ' + (r.error || 'unknown error')); return; }
         await this[removeItem](path);
       }
     };
@@ -205,6 +219,7 @@ export default class App extends ShadowComponent {
               <thead><tr><th>Key</th><th>When</th><th>Action</th></tr></thead>
               <tbody>
                 <tr><td><strong>Up</strong> / <strong>Down</strong></td><td>Always</td><td>Select the previous/next dupe set (also updates the open Photo Viewer, if any)</td></tr>
+                <tr><td><strong>Home</strong> / <strong>End</strong></td><td>Always</td><td>Select the first/last dupe set (also updates the open Photo Viewer, if any)</td></tr>
                 <tr><td><strong>Enter</strong></td><td>Always</td><td>Open the first photo of the selected dupe set in the Photo Viewer</td></tr>
                 <tr><td><strong>Delete</strong></td><td>Not in Photo Viewer</td><td>Auto Delete the selected dupe set</td></tr>
                 <tr><td><strong>Backspace</strong></td><td>Always</td><td>Delete the checked images, if any are checked</td></tr>
@@ -297,10 +312,13 @@ export default class App extends ShadowComponent {
         else byPath.set(f.path, { ...f, ref: true, search: false });
       }
       const files = [...byPath.values()];
-      if (!files.length) { this[setProgress](null); await alertDialog('No images found in the selected source(s).'); return; }
+      if (!files.length) { this[setProgress](null); Toast.warning('No images found in the selected source(s).'); return; }
 
-      const { useNN, usePhash, useGeo, preferGPU } = this.settings;
-      const MODEL = useNN ? 'Xenova/dinov2-small' : 'phash-only';
+      const { useNN, usePhash, useGeo, useCopy, preferGPU } = this.settings;
+      const MODEL = useNN ? MODEL_NN : 'phash-only';
+      // Tracked separately from MODEL so the two descriptor tiers' caches invalidate
+      // independently — turning one on shouldn't discard the other's work.
+      const SSCD_MODEL = 'sscd_disc_mixup';
       await initCache();
 
       // 1) Resolve content hashes — reuse cached hashes for unchanged paths.
@@ -312,32 +330,66 @@ export default class App extends ShadowComponent {
         if (c && c.size === f.size && Math.abs(c.mtime - f.mtime) < 1 && c.hash) f.hash = c.hash;
         else needHash.push(f);
       }
+      let migrated = 0;
       if (needHash.length) {
         const HB = 64, newPathRows = [];
+        // Paths whose content changed under us — old hash kept so the user's
+        // not-duplicate decisions can follow the file to its new identity.
+        const rehashed = [];
         for (let i = 0; i < needHash.length; i += HB) {
           if (this[cancelRequested]) break;
           const slice = needHash.slice(i, i + HB);
           const ids = await api.fileIdentities(slice.map(f => f.path));
-          ids.forEach((id, k) => { const f = slice[k]; if (id.hash) { f.hash = id.hash; newPathRows.push({ path: f.path, size: id.size, mtime: id.mtime, hash: id.hash }); } });
+          ids.forEach((id, k) => {
+            const f = slice[k];
+            if (!id.hash) return;
+            const prev = pathCache.get(f.path)?.hash;
+            if (prev && prev !== id.hash) rehashed.push([prev, id.hash]);
+            f.hash = id.hash;
+            newPathRows.push({ path: f.path, size: id.size, mtime: id.mtime, hash: id.hash });
+          });
           this[setProgress](0.02 + 0.08 * (Math.min(i + HB, needHash.length) / needHash.length), `Identifying files… ${Math.min(i + HB, needHash.length)} / ${needHash.length}`);
         }
         await bulkUpsert('paths', ['path', 'size', 'mtime', 'hash'], newPathRows);
+        for (const [prev, next] of rehashed) {
+          try { migrated += await migrateExcludedPairs(prev, next); }
+          catch (e) { console.warn('exclusion migration failed', e); }
+        }
       }
+      // Sweep rows for hashes nothing points at anymore (what an external edit orphans).
+      // Runs after paths are updated so the new identities already count as referenced.
+      let collected = { images: 0, orb: 0 };
+      try { collected = await gcCache(); } catch (e) { console.warn('cache gc failed', e); }
 
-      const items = files.filter(f => f.hash).map(f => ({ path: f.path, name: f.name, size: f.size, hash: f.hash, ref: !!f.ref, search: !!f.search, phash: null, embedding: null }));
+      const items = files.filter(f => f.hash).map(f => ({ path: f.path, name: f.name, size: f.size, hash: f.hash, ref: !!f.ref, search: !!f.search, phash: null, embedding: null, sscd: null }));
       const uniqueHashes = [...new Set(items.map(i => i.hash))];
 
       // 2) Features per unique hash — load from cache, compute only the misses.
-      const featRows = await selectIn('images', 'hash,phash,embedding,model', 'hash', uniqueHashes);
+      //    Validity is tracked per tier: the pHash/embedding pair is gated on `model`, the
+      //    SSCD descriptor on `sscdModel`, so enabling one tier never discards the other's
+      //    cached work.
+      const featRows = await selectIn('images', 'hash,phash,embedding,model,sscd,sscdModel', 'hash', uniqueHashes);
       const featByHash = new Map();
       for (const h of uniqueHashes) {
         const r = featRows.get(h);
-        if (r && r.model === MODEL) featByHash.set(h, { phash: r.phash ? JSON.parse(r.phash) : null, embedding: r.embedding ? b64ToEmb(r.embedding) : null });
+        if (!r) continue;
+        const baseOk = r.model === MODEL_NN || r.model === MODEL;
+        featByHash.set(h, {
+          phash: baseOk && r.phash ? JSON.parse(r.phash) : null,
+          embedding: r.model === MODEL_NN && r.embedding ? b64ToEmb(r.embedding) : null,
+          sscd: r.sscdModel === SSCD_MODEL && r.sscd ? b64ToEmb(r.sscd) : null
+        });
       }
-      const missingHashes = uniqueHashes.filter(h => !featByHash.has(h));
+      // A hash needs analysis when a tier the user has ENABLED has nothing cached for it.
+      const missingHashes = uniqueHashes.filter(h => {
+        const f = featByHash.get(h);
+        if (!f) return true;
+        return (usePhash && !f.phash) || (useNN && !f.embedding) || (useCopy && !f.sscd);
+      });
       const repPath = new Map();
       for (const it of items) if (!repPath.has(it.hash)) repPath.set(it.hash, it.path);
 
+      let copyReady = false;
       if (missingHashes.length) {
         if (useNN) {
           this[setProgress](0.1, 'Loading neural model (first run downloads it)…');
@@ -345,29 +397,54 @@ export default class App extends ShadowComponent {
           if (info.ok) this[setProgress](0.12, `Model ready on ${String(info.device).toUpperCase()}.`);
           else console.warn('Engine init failed:', info.error);
         }
+        if (useCopy) {
+          this[setProgress](0.11, 'Loading copy-detection model…');
+          const info = await api.initSscd();
+          copyReady = !!info.ok;
+          if (!copyReady) console.warn('Copy-detection tier unavailable:', info.error);
+        }
         const BATCH = 8, imgRows = [];
         for (let i = 0; i < missingHashes.length; i += BATCH) {
           if (this[cancelRequested]) break;
           const slice = missingHashes.slice(i, i + BATCH);
-          const res = await api.embedImages(slice.map(h => repPath.get(h)), { useNN, usePhash });
+          const res = await api.embedImages(slice.map(h => repPath.get(h)), { useNN, usePhash, useCopy: copyReady });
           res.forEach((r, k) => {
             const h = slice[k];
-            featByHash.set(h, { phash: r.phash || null, embedding: r.embedding || null });
-            imgRows.push({ hash: h, phash: r.phash ? JSON.stringify(r.phash) : null, embedding: r.embedding ? embToB64(r.embedding) : null, model: MODEL, w: null, h: null });
+            // Merge over whatever was already cached: bulkUpsert does INSERT OR REPLACE, so
+            // writing only the freshly-computed tier would blank the others.
+            const prev = featByHash.get(h) || {};
+            const merged = {
+              phash: r.phash || prev.phash || null,
+              embedding: r.embedding || prev.embedding || null,
+              sscd: r.sscd || prev.sscd || null
+            };
+            featByHash.set(h, merged);
+            imgRows.push({
+              hash: h,
+              phash: merged.phash ? JSON.stringify(merged.phash) : null,
+              embedding: merged.embedding ? embToB64(merged.embedding) : null,
+              // `model` describes what embedding is actually stored, so a pHash-only scan
+              // can't mislabel a row that still carries a real neural embedding.
+              model: merged.embedding ? MODEL_NN : 'phash-only',
+              sscd: merged.sscd ? embToB64(merged.sscd) : null,
+              sscdModel: merged.sscd ? SSCD_MODEL : null,
+              w: null, h: null
+            });
           });
           this[setProgress](0.12 + 0.55 * (Math.min(i + BATCH, missingHashes.length) / missingHashes.length), `Analyzing new images… ${Math.min(i + BATCH, missingHashes.length)} / ${missingHashes.length}`);
         }
-        await bulkUpsert('images', ['hash', 'phash', 'embedding', 'model', 'w', 'h'], imgRows);
+        await bulkUpsert('images', ['hash', 'phash', 'embedding', 'model', 'sscd', 'sscdModel', 'w', 'h'], imgRows);
       }
 
-      for (const it of items) { const f = featByHash.get(it.hash); if (f) { it.phash = f.phash; it.embedding = f.embedding; } }
+      for (const it of items) { const f = featByHash.get(it.hash); if (f) { it.phash = f.phash; it.embedding = f.embedding; it.sscd = f.sscd; } }
       this.items = items;
       // Recorded so a later settings change can tell whether a now-enabled tier was
       // actually analyzed this scan (onConfigChange uses it to offer a rescan).
       const summary = {
         files: items.length, unique: uniqueHashes.length, newFeat: missingHashes.length,
+        migratedExclusions: migrated, gcImages: collected.images, gcOrb: collected.orb,
         reusedFeat: uniqueHashes.length - missingHashes.length, newOrb: 0, reusedOrb: 0,
-        computedTiers: { usePhash, useNN, useGeo }
+        computedTiers: { usePhash, useNN, useGeo, useCopy: useCopy && copyReady }
       };
 
       this[pairs] = buildCandidatePairs(this.items, this.settings);
@@ -388,14 +465,19 @@ export default class App extends ShadowComponent {
       //    neither ran, in which case there's no similarity to sort by, so every pair goes
       //    through (Geometric is solo: it's the only signal that gets to decide a match).
       if (useGeo && !this[cancelRequested]) {
-        const ORB_CAP = 6000;
+        // Geometric verification is the tier that survives crops and rotations, so gating
+        // it behind a *cheap-tier* score is self-defeating: the pairs it would rescue are
+        // exactly the ones pHash/neural score low. The floor now defaults to 0, letting
+        // every candidate pair through, with orbCap as the only budget limit (pairs are
+        // ranked by cheap similarity so the cap sheds the least-promising ones first).
+        const { orbFloor = 0, orbCap = 20000 } = this.settings;
         const cheapSignal = usePhash || useNN;
         const sim = p => Math.max(p.sEmbed, p.sPhash);
         const keyOf = p => pairKey(this.items[p.i].hash, this.items[p.j].hash);
         const border = this[pairs]
-          .filter(p => this.items[p.i].hash !== this.items[p.j].hash && (!cheapSignal || sim(p) >= 0.2))
+          .filter(p => this.items[p.i].hash !== this.items[p.j].hash && (!cheapSignal || sim(p) >= orbFloor))
           .sort((a, b) => sim(b) - sim(a))
-          .slice(0, ORB_CAP);
+          .slice(0, orbCap);
         if (border.length) {
           const keys = border.map(keyOf);
           const orbCacheMap = await selectIn('orbcache', 'pair,score', 'pair', keys);
@@ -430,9 +512,9 @@ export default class App extends ShadowComponent {
       this[setProgress](1, 'Clustering…');
       this[recluster]();
       this[setProgress](null);
-      if (this[cancelRequested]) await alertDialog('Scan cancelled — showing results for what finished so far. Anything already analyzed stays cached.');
+      if (this[cancelRequested]) Toast.create('Scan cancelled — showing results for what finished so far. Anything already analyzed stays cached.');
     } catch (e) {
-      console.error(e); this[setProgress](null); await errorDialog('Scan failed: ' + (e?.message || e));
+      console.error(e); this[setProgress](null); Toast.error('Scan failed: ' + (e?.message || e));
     } finally {
       this.scanning = false;
     }
@@ -471,7 +553,7 @@ export default class App extends ShadowComponent {
     } else if (key === 'settings') {
       const computed = this.lastScan?.computedTiers;
       if (computed && this.items.length) {
-        const TIER_LABELS = { usePhash: 'Perceptual hash', useNN: 'Neural look-alikes', useGeo: 'Geometric (ORB)' };
+        const TIER_LABELS = { usePhash: 'Perceptual hash', useNN: 'Neural look-alikes', useGeo: 'Geometric (ORB)', useCopy: 'Copy detection' };
         const newlyEnabled = Object.keys(TIER_LABELS).filter(k => value[k] && !oldValue[k] && !computed[k]);
         if (newlyEnabled.length) {
           const names = newlyEnabled.map(k => TIER_LABELS[k]);
@@ -491,12 +573,12 @@ export default class App extends ShadowComponent {
   onUIChange = e => { if (e.detail.key === 'selectedId') this.requestUpdate(); };
 
   // Enter opens the first photo of the selected dupe set, Delete runs Auto Delete on it,
-  // Backspace runs Delete Selected, ` (or ~) runs Not Duplicates, and Up/Down move the
-  // selection to the previous/next dupe set — but not while focus is on a
-  // button/link/input/dialog, where those keys already do something else
-  // (activate, submit, confirm, delete-current-photo).
+  // Backspace runs Delete Selected, ` (or ~) runs Not Duplicates, Up/Down move the
+  // selection to the previous/next dupe set, and Home/End jump to the first/last
+  // dupe set — but not while focus is on a button/link/input/dialog, where those
+  // keys already do something else (activate, submit, confirm, delete-current-photo).
   onGlobalKeydown = async e => {
-    const isNav = e.key === 'ArrowUp' || e.key === 'ArrowDown';
+    const isNav = e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'Home' || e.key === 'End';
     const isTilde = e.key === '~' || e.key === '`';
     if (e.key !== 'Enter' && e.key !== 'Delete' && e.key !== 'Backspace' && !isTilde && !isNav) return;
     const path = e.composedPath();
@@ -517,8 +599,13 @@ export default class App extends ShadowComponent {
     } else if (isTilde) {
       detail?.triggerNotDuplicates();
     } else if (isNav) {
-      const idx = this.groups.findIndex(g => g.id === this.selectedId);
-      const nextIdx = e.key === 'ArrowUp' ? idx - 1 : idx + 1;
+      let nextIdx;
+      if (e.key === 'Home') nextIdx = 0;
+      else if (e.key === 'End') nextIdx = this.groups.length - 1;
+      else {
+        const idx = this.groups.findIndex(g => g.id === this.selectedId);
+        nextIdx = e.key === 'ArrowUp' ? idx - 1 : idx + 1;
+      }
       if (nextIdx < 0 || nextIdx >= this.groups.length) return;
       this.selectedId = this.groups[nextIdx].id;
       await this[syncViewerToSelection]();
@@ -539,8 +626,8 @@ export default class App extends ShadowComponent {
       await clearCache();
       this[excluded] = new Set();
       if (this.items.length) this[recluster]();
-      await alertDialog('Cache cleared.');
-    } catch (e) { await errorDialog('Could not clear cache: ' + (e?.message || e)); }
+      Toast.success('Cache cleared.');
+    } catch (e) { Toast.error('Could not clear cache: ' + (e?.message || e)); }
   };
 
   onResetSettings = async () => {
@@ -550,7 +637,7 @@ export default class App extends ShadowComponent {
     // (which reclusters if there are results).
     this[cfgEl]?.set('settings', { ...DEFAULT_SETTINGS });
     this[cfgEl]?.set('thresholds', { ...DEFAULT_THRESHOLDS });
-    await alertDialog('Settings reset.');
+    Toast.success('Settings reset.');
   };
 
   onFileAction = async e => {
@@ -562,13 +649,13 @@ export default class App extends ShadowComponent {
         if (!ok) { onDone?.(false); return; }
       }
       const r = await api.fileAction('trash', path);
-      if (!r.ok) { await errorDialog('Could not delete the file: ' + (r.error || 'unknown error')); onDone?.(false); return; }
+      if (!r.ok) { Toast.error('Could not delete the file: ' + (r.error || 'unknown error')); onDone?.(false); return; }
       await this[removeItem](path);
       onDone?.(true);
       return;
     }
     const r = await api.fileAction(action, path);
-    if (r && r.ok === false) await errorDialog(`Could not ${action} the file: ` + (r.error || 'unknown error'));
+    if (r && r.ok === false) Toast.error(`Could not ${action} the file: ` + (r.error || 'unknown error'));
   };
 
   onAutoDelete = async e => {

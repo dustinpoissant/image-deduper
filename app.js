@@ -4,3 +4,7 @@ import "/modules/kempo-ui/dist/components/ThemeSwitcher.js";
 import "/modules/kempo-ui/dist/components/Dropdown.js";
 import "/modules/kempo-ui/dist/components/Context.js";
 import "/components/App.js";
+
+// kempo-app itself sets window.kempo.overlayRoot (see kempo-app's src/renderer/index.html),
+// so Toast/Dialog/PhotoViewer are already kept out of the titlebar with no per-project
+// config needed here.

@@ -4,10 +4,11 @@
 
 **Image Deduper** is an Electron desktop app that finds duplicate images even when they're cropped, rotated, scaled, filtered, recompressed, or watermarked. It's built on **kempo-app** (the Electron framework) and **kempo-ui** (Lit web components), both Dustin's own packages.
 
-The detection engine is **3-tier**, runs entirely in-process (no Python), and caches aggressively in SQLite:
+The detection engine is **4-tier**, runs entirely in-process (no Python), and caches aggressively in SQLite:
 1. **pHash** — perceptual hash; catches re-saves, rescales, 90° rotations, mirror flips.
 2. **Neural (DINOv2)** — `@huggingface/transformers`, GPU/DML when available; finds edited/filtered look-alikes (only used to *find candidates*).
-3. **Geometric (ORB)** — `@techstark/opencv-js`; keypoint+geometry match; the real "is this a copy" evidence (crops, rotations, watermarks).
+3. **Geometric (ORB)** — `@techstark/opencv-js`; keypoint+geometry match; per-pair, so it's the slow one.
+4. **Copy detection (SSCD)** — `onnxruntime-node` on a converted ONNX (`tools/sscd/convert.py`); trained to match *copies* of an image but NOT different photos of the same subject, which is what the DINOv2 tier gets wrong. Most accurate tier; model is gitignored and must be built or downloaded.
 
 See the `image-deduper-engine` memory for engine gotchas.
 
@@ -56,14 +57,37 @@ components/              Web components (one per file, PascalCase, default expor
   SliderInput.js        Slider + editable number box (threshold % or integer settings)
   CompareViewer.js      Fullscreen wipe-compare overlay
 lib/
-  engine.js             Clustering, caching, ORB matcher, thumbnails (renderer side)
+  engine.js             Clustering, caching (incl. GC), ORB matcher, thumbnails (renderer side)
   api.js                Proxy over window.api (custom api/*.js via window.api.call)
   contexts.js           getConfig/getUI — locate the k-context elements
   styles.js             Shared Lit styles
+src/                    Main-process feature extraction (imported by api/*.js, not window.api)
+  engine.js             pHash + DINOv2 embedding
+  sscd.js               SSCD copy-detection embedding (ONNX Runtime)
 api/                    Main-process custom handlers → window.api.<name>()
-  scanImages, selectImages, selectDirectories, fileIdentities,
-  embedImages, initEngine, fileAction
+  scanImages, selectImages, selectDirectories, fileIdentities, thumbnail,
+  embedImages, grayBuffer, initEngine, initSscd, fileAction
+models/                 Bundled SSCD weights (models/README.md)
+tools/                  Dev-only: calibrate.js (accuracy harness over example/), sscd/ (ONNX conversion)
 ```
+
+### Detection engine internals
+
+- **Clustering is complete-linkage, not transitive chaining.** `clusterPairs` (`lib/engine.js`)
+  requires *every* pair within a candidate group — not just the one pair that triggered the
+  merge — to individually clear a `cohesion` floor (default 50% of each tier's own
+  threshold) before merging. Prevents A↔B↔C chains where A and C aren't actually alike.
+  `cohesion: 0` restores old single-linkage behavior.
+- **A group's displayed score is the average of every in-group pair**, not the strongest
+  pair's — an unscored pair (below every tier's candidate floor) counts as 0. The % reflects
+  how alike the whole set is, not just its best link.
+- **Cache is keyed by content hash (SHA-256), not path.** Editing a file outside the app
+  gives it a new hash. `App.js`'s scan pipeline then calls `migrateExcludedPairs()` (carries
+  "Not Duplicate" decisions from the old hash to the new one — copies rather than moves,
+  since the old hash may still belong to an untouched second copy) and `gcCache()` (drops
+  `images`/`orbcache` rows nothing in `paths` references anymore; never touches
+  `excluded_pairs` — a temporarily-unreferenced hash, e.g. an unplugged drive, must not
+  lose its exclusions).
 
 ### App-level state lives in two `k-context`s
 
@@ -91,6 +115,13 @@ Components follow the skills in `.claude/skills/` (copied from
 PascalCase class name, `export default`; sectioned with `/* ... */` comments; **no `#`-private**
 (Safari) — use module-scoped `Symbol()` keys defined/assigned in the constructor; reactive
 state only when `render()` must react, otherwise a symbol.
+
+**Toast vs Dialog**: `Toast.success/warning/error/create` for anything that only conveys a
+result with no decision to make (scan cancelled, an action failed, settings reset) — it
+auto-dismisses and never blocks. `Dialog.confirm` (via `confirmDialog` in `App.js`) is only
+for an actual yes/no the user must answer before continuing (delete this? clear the cache?).
+`alertDialog` is reserved for the one case that's neither — the Keyboard Controls reference
+table, which the user opens deliberately and reads at their own pace.
 
 ## Dependency chain & updating
 

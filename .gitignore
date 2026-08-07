@@ -13,3 +13,15 @@ dist/
 *.mp4
 *.mov
 *.avi
+
+# Calibration harness scratch (raw per-pair scores, regenerable)
+tools/.cache/
+
+# NOTE: models/sscd_disc_mixup.onnx (98MB) IS committed on purpose — it's bundled into
+# the packaged app (kempo-app builds with asar:false, so extra folders ship as-is) and
+# there's no public ONNX build of SSCD to download instead. It sits ~1.8MB under GitHub's
+# 100MB per-file hard limit; if the model is ever swapped for a larger one, move it to
+# git-lfs rather than trying to squeeze under the cap.
+# Intermediate conversion artifacts are not committed:
+models/*.torchscript.pt
+models/*.int8.onnx

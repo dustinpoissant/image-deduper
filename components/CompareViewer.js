@@ -1,5 +1,6 @@
 import ShadowComponent from '/modules/kempo-ui/dist/components/ShadowComponent.js';
 import { html, css } from '/modules/kempo-ui/dist/lit-all.min.js';
+import getOverlayRoot from '/modules/kempo-ui/dist/utils/overlayRoot.js';
 
 // Fullscreen wipe-compare: the left photo is clipped to the area left of the
 // cursor, revealing the right photo underneath — move the mouse to scrub
@@ -159,7 +160,7 @@ export default class CompareViewer extends ShadowComponent {
     Static Methods
   */
   static open({ leftSrc, leftLabel, rightSrc, rightLabel, frameW, frameH }) {
-    const mountRoot = document.querySelector('[data-overlay-root]') || document.body;
+    const mountRoot = getOverlayRoot();
 
     const container = document.createElement('div');
     container.style.position = 'fixed';

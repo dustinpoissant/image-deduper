@@ -5,7 +5,7 @@ import { html, css } from '/modules/kempo-ui/dist/lit-all.min.js';
   Utility Functions
 */
 // Per-tier icon for the score widget.
-const TIER_ICON = { phash: 'tag', nn: 'network_intelligence', geo: 'shapes' };
+const TIER_ICON = { phash: 'tag', nn: 'network_intelligence', geo: 'shapes', copy: 'content_copy' };
 
 export default class Scores extends ShadowComponent {
   /*

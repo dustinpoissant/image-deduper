@@ -72,8 +72,13 @@ export default class SliderInput extends ShadowComponent {
     const decimals = this.step % 1 === 0 ? 0 : 1;
     const shown = this[snap](this.value).toFixed(decimals);
     const display = this.editing ? shown : this.format === 'percent' ? `${shown}%` : shown;
+    // k-slider takes no step, so its value runs continuously while dragging, and its
+    // formatter falls back to String(value) when handed no pattern — which is how a
+    // whole-number setting ended up showing "62.7381…" in the tooltip. Always give it a
+    // pattern so the tooltip agrees with the snapped value in the input beside it.
+    const tip = (decimals ? '0.0' : '0') + (this.format === 'percent' ? '%' : '');
     return html`
-      <k-slider class="col d-b" min=${this.min} max=${this.max} tooltip .format=${this.format === 'percent' ? (decimals ? '0.0%' : '0%') : null}
+      <k-slider class="col d-b" min=${this.min} max=${this.max} tooltip .format=${tip}
         .value=${String(this.value)} @change=${this.onSliderChange}></k-slider>
       <input type="text" inputmode="decimal" class="val mlh" .value=${display}
         @focus=${this.onFocus} @blur=${this.onBlur} @keydown=${this.onKeydown}>`;

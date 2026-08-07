@@ -85,7 +85,17 @@ function hashMatrix(m) {
   return hex;
 }
 
-/** Returns an array of 8 hex hashes (one per dihedral orientation). */
+/**
+ * Returns { hashes, detail }:
+ *   hashes - 8 hex hashes, one per dihedral orientation
+ *   detail - contrast of the downsampled image (std dev in 0-255 units)
+ *
+ * `detail` exists because the hash is built by asking "is this region above or below the
+ * median" — on an image with almost no contrast (a solid background, a nearly black
+ * photo, a blank screenshot) there is no real structure to encode, so the bits come out
+ * essentially arbitrary AND similar to every other flat image, which makes them match
+ * each other for no reason. Callers use it to skip the tier for such images.
+ */
 export async function phash(path) {
   const { data } = await sharp(await readImage(path)).greyscale().resize(HSIZE, HSIZE, { fit: 'fill' })
     .raw().toBuffer({ resolveWithObject: true });
@@ -95,7 +105,13 @@ export async function phash(path) {
     for (let x = 0; x < HSIZE; x++) r[x] = data[y * HSIZE + x];
     base.push(r);
   }
-  return orientations(base).map(hashMatrix);
+  let mean = 0;
+  for (let i = 0; i < data.length; i++) mean += data[i];
+  mean /= data.length;
+  let sq = 0;
+  for (let i = 0; i < data.length; i++) { const d = data[i] - mean; sq += d * d; }
+  const detail = Math.sqrt(sq / data.length);
+  return { hashes: orientations(base).map(hashMatrix), detail };
 }
 
 /* ------------------------------------------------------------------ *
