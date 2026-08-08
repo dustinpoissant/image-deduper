@@ -169,6 +169,8 @@ jobs:
       contents: write
     steps:
       - name: Publish the release
-        run: gh release edit "${{ needs.version.outputs.tag }}" --draft=false
+        # --repo is required: this job has no checkout step (nothing else here needs the
+        # working tree), so gh has no local git remote to infer the repo from.
+        run: gh release edit "${{ needs.version.outputs.tag }}" --repo "${{ github.repository }}" --draft=false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
