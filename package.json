@@ -1,6 +1,6 @@
 {
   "name": "image-deduper",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Find duplicate images even when cropped, rotated, scaled, filtered, or watermarked.",
   "type": "module",
   "author": "Dustin Poissant <dustinpoissant@gmail.com>",
