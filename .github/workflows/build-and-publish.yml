@@ -83,7 +83,12 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20.x'
+          # Electron 42 requires Node >=22.12.0. Node 20's older bundled node-gyp also
+          # breaks on current runner images two different ways: it depends on Python's
+          # distutils module (removed in the macOS runner's Python 3.14) and doesn't
+          # recognize the Visual Studio version string the Windows runner actually has.
+          # Confirmed via a real failed run — this isn't a hypothetical.
+          node-version: '22.x'
           cache: 'npm'
 
       - run: npm ci
