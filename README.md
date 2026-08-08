@@ -37,6 +37,11 @@ normal `npm install`.
 they're run on. See [kempo-app](https://github.com/dustinpoissant/kempo-app) for how
 packaging works under the hood.
 
+Releases (Windows/Mac/Linux installers + standalone builds, published to
+[GitHub Releases](https://github.com/dustinpoissant/image-deduper/releases)) are built by
+`.github/workflows/build-and-publish.yml` — a push to `master` auto-bumps the patch version
+and publishes; a minor/major bump is triggered manually from the Actions tab.
+
 ## How the detection engine works
 
 Four tiers, run entirely in-process (no Python at runtime, no external services):

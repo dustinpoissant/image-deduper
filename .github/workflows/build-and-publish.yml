@@ -1,0 +1,169 @@
+name: Build and Publish
+
+# Same pattern as kempo-ui/kempo-app: a push to master auto-bumps the patch version and
+# publishes; minor/major bumps are triggered manually via workflow_dispatch. Unlike those
+# two (pure JS, npm publish, single ubuntu-latest job), this builds real platform installers
+# across three OSes and publishes them as GitHub Release assets instead of to npm.
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+    inputs:
+      version-type:
+        description: 'Version bump type'
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+        default: patch
+
+jobs:
+  # Bumps package.json, commits + tags it, pushes both, and creates a DRAFT release for
+  # the build jobs to attach assets to. Runs once so there's no race between matrix legs
+  # over who bumps the version or creates the release.
+  version:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.bump.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set version type
+        id: versiontype
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "type=${{ inputs.version-type }}" >> $GITHUB_OUTPUT
+          else
+            echo "type=patch" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Bump version, commit, tag, push
+        id: bump
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@github.com"
+          npm version ${{ steps.versiontype.outputs.type }} --no-git-tag-version
+          VERSION=$(node -p "require('./package.json').version")
+          TAG="v$VERSION"
+          git add package.json package-lock.json
+          git commit -m "ci: bump ${{ steps.versiontype.outputs.type }} version to $TAG [skip ci]"
+          git tag "$TAG"
+          git push origin HEAD:master
+          git push origin "$TAG"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Create draft release
+        run: gh release create "${{ steps.bump.outputs.tag }}" --title "${{ steps.bump.outputs.tag }}" --generate-notes --draft
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build:
+    needs: version
+    strategy:
+      # One platform failing shouldn't cancel the other two mid-build.
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Build the exact commit the version job just tagged, not whatever's newest —
+          # keeps all three platforms' embedded version metadata consistent.
+          ref: ${{ needs.version.outputs.tag }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: 'npm'
+
+      - run: npm ci
+        shell: bash
+
+      # kempo-app's own ABI-rebuild step (bin/kempo-app.js) is skipped entirely on
+      # Windows, and even where it runs it's explicitly best-effort. Its own comment says
+      # the "prebuilt binary already matches Electron's ABI" assumption "happens to hold
+      # on Windows here only because of leftover build state, not anything guaranteed."
+      # A fresh CI runner has none of that — this failure mode is not hypothetical: it's
+      # the exact NODE_MODULE_VERSION mismatch crash reproduced against kempo-app's own
+      # example app while building this workflow. Force a real rebuild instead of relying
+      # on the assumption holding here too.
+      - name: Rebuild native modules for Electron's ABI
+        run: npx --yes @electron/rebuild
+        shell: bash
+
+      - run: npm run buildInstaller
+        shell: bash
+
+      - run: npm run buildStandalone
+        shell: bash
+
+      # electron-builder's default output filenames are versioned (e.g. "Image Deduper
+      # Setup 0.2.0.exe") and differ per OS — renamed here to the static names
+      # docs/index.html's download buttons already expect, so the workflow does the
+      # renaming rather than changing that public URL scheme or kempo-app's build config.
+      - name: Rename and upload installer(s)
+        shell: bash
+        run: |
+          cd dist
+          case "${{ runner.os }}" in
+            Windows)
+              mv "$(ls *.exe | head -n1)" "Image-Deduper-Setup.exe"
+              gh release upload "${{ needs.version.outputs.tag }}" "Image-Deduper-Setup.exe" --clobber
+              ;;
+            macOS)
+              mv "$(ls *.dmg | head -n1)" "Image-Deduper-Setup.dmg"
+              gh release upload "${{ needs.version.outputs.tag }}" "Image-Deduper-Setup.dmg" --clobber
+              ;;
+            Linux)
+              mv "$(ls *.AppImage | head -n1)" "Image-Deduper-Setup.AppImage"
+              mv "$(ls *.deb | head -n1)" "Image-Deduper-Setup.deb"
+              gh release upload "${{ needs.version.outputs.tag }}" "Image-Deduper-Setup.AppImage" "Image-Deduper-Setup.deb" --clobber
+              ;;
+          esac
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # buildStandalone produces a folder (win-unpacked/, linux-unpacked/, mac/), not a
+      # single file — zip it before it can be one release asset. 7z ships on windows-latest
+      # runners by default; zip ships on ubuntu-latest/macos-latest.
+      - name: Zip and upload standalone build
+        shell: bash
+        run: |
+          cd dist
+          case "${{ runner.os }}" in
+            Windows) DIR="win-unpacked"; OUT="Image-Deduper-Standalone-win.zip" ;;
+            macOS)   DIR="$(ls -d mac* | head -n1)"; OUT="Image-Deduper-Standalone-mac.zip" ;;
+            Linux)   DIR="linux-unpacked"; OUT="Image-Deduper-Standalone-linux.zip" ;;
+          esac
+          if [ "${{ runner.os }}" == "Windows" ]; then
+            7z a "$OUT" "$DIR" > /dev/null
+          else
+            zip -qr "$OUT" "$DIR"
+          fi
+          gh release upload "${{ needs.version.outputs.tag }}" "$OUT" --clobber
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Only runs if version AND every build matrix leg succeeded (GitHub Actions' default
+  # needs behavior) — a release missing a platform's assets stays a draft instead of
+  # going out incomplete.
+  publish:
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Publish the release
+        run: gh release edit "${{ needs.version.outputs.tag }}" --draft=false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

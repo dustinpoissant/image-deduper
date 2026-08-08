@@ -123,6 +123,19 @@ for an actual yes/no the user must answer before continuing (delete this? clear 
 `alertDialog` is reserved for the one case that's neither — the Keyboard Controls reference
 table, which the user opens deliberately and reads at their own pace.
 
+## Releasing
+
+`.github/workflows/build-and-publish.yml` — same trigger pattern as kempo-ui/kempo-app: a
+push to `master` auto-bumps the **patch** version and cuts a release; minor/major bumps go
+through `workflow_dispatch` (Actions tab → Run workflow → pick the bump type). Unlike those
+two (npm publish, single job), this builds real installers on `windows-latest`,
+`macos-latest`, and `ubuntu-latest` in parallel and attaches them to a GitHub Release —
+`Image-Deduper-Setup.{exe,dmg,AppImage,deb}` plus a zipped standalone build per OS. The
+release stays a draft until every platform succeeds, so a partial/broken release is never
+published. Docs site download buttons (`docs/index.html`) point at fixed filenames the
+workflow renames the (versioned, per-OS-different) electron-builder output to — see the
+workflow's own comments for exactly how.
+
 ## Dependency chain & updating
 
 `kempo-ui` → `kempo-app` → `image-deduper`. To pull a new kempo-ui through:
