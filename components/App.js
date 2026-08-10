@@ -9,7 +9,7 @@ import './Controls.js';
 import './Results.js';
 import './Detail.js';
 import {
-  initCache, selectIn, bulkUpsert, embToB64, b64ToEmb, clearCache, removeFromCache,
+  selectIn, bulkUpsert, embToB64, b64ToEmb, clearCache, removeFromCache,
   buildCandidatePairs, clusterPairs, remapOrb, OrbMatcher, pairKey, markNotDuplicates, getExcludedPairs,
   migrateExcludedPairs, gcCache, DEFAULT_COHESION
 } from '/lib/engine.js';
@@ -319,7 +319,6 @@ export default class App extends ShadowComponent {
       // Tracked separately from MODEL so the two descriptor tiers' caches invalidate
       // independently — turning one on shouldn't discard the other's work.
       const SSCD_MODEL = 'sscd_disc_mixup';
-      await initCache();
 
       // 1) Resolve content hashes — reuse cached hashes for unchanged paths.
       this[setProgress](0.02, 'Identifying files…');
