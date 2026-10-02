@@ -16,6 +16,9 @@ export default class ImageCard extends ShadowComponent {
   static properties = {
     item: { type: Object },
     checked: { type: Boolean },
+    // 'keep' / 'delete' once Detail has ranked the group, or null while that's still
+    // pending — reflected to an attribute so :host styling can key off it directly.
+    previewRole: { type: String, reflect: true, attribute: 'preview-role' },
     thumbSrc: { state: true },
     dims: { state: true }
   };
@@ -55,6 +58,7 @@ export default class ImageCard extends ShadowComponent {
     */
     this.item = null;
     this.checked = false;
+    this.previewRole = null;
     this.thumbSrc = '';
     this.dims = '—';
   }
@@ -107,6 +111,14 @@ export default class ImageCard extends ShadowComponent {
       border: 1px solid var(--c_border);
       border-radius: var(--radius);
       overflow: hidden;
+    }
+    /* Auto Delete preview: which card it would keep (green) vs. delete (red), so
+       that's visible before the button is ever clicked. */
+    :host([preview-role="keep"]) {
+      border: 2px solid var(--c_success);
+    }
+    :host([preview-role="delete"]) {
+      border: 2px solid var(--c_danger);
     }
     .ref-badge {
       position: absolute;

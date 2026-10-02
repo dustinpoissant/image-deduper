@@ -270,10 +270,18 @@
           formats, then smaller file size — and asks you to confirm before deleting the rest.
         </p>
         <p>
-          Screenshots are skipped over by default when picking the winner, even if a screenshot
-          happens to be the highest-resolution file in the set. A screenshot's resolution usually
-          just reflects your screen size, not actual photo quality, so it's rarely the copy you
-          actually want to keep. You can turn this off in Settings.
+          A file named like <strong>photo (1).jpg</strong>, <strong>photo (2).jpg</strong>,
+          <strong>photo - Copy.jpg</strong>, or <strong>photo - Copy (2).jpg</strong> is
+          deprioritized as a tiebreaker — if it's still tied with another file on resolution,
+          format, and file size, the plain-named one wins, since those naming patterns are how
+          Chrome and Windows Explorer mark a copy they made for you. A clear resolution or
+          quality edge still wins regardless of naming.
+        </p>
+        <p>
+          Screenshots are skipped over by default too, even if a screenshot happens to be the
+          highest-resolution file in the set. A screenshot's resolution usually just reflects
+          your screen size, not actual photo quality, so it's rarely the copy you actually want
+          to keep. You can turn this off in Settings.
         </p>
       </section>
 

@@ -3,6 +3,7 @@ import { html, css } from '/modules/kempo-ui/dist/lit-all.min.js';
 import '/modules/kempo-ui/dist/components/Toggle.js';
 import '/modules/kempo-ui/dist/components/Progress.js';
 import '/modules/kempo-ui/dist/components/Accordion.js';
+import '/modules/kempo-ui/dist/components/Dialog.js';
 import { shared } from '/lib/styles.js';
 import { getConfig } from '/lib/contexts.js';
 import api from '/lib/api.js';
@@ -23,6 +24,7 @@ const addSources = Symbol('addSources');
 const removeSource = Symbol('removeSource');
 const toggleRow = Symbol('toggleRow');
 const tier = Symbol('tier');
+const openSettings = Symbol('openSettings');
 
 export default class Controls extends ShadowComponent {
   /*
@@ -85,11 +87,14 @@ export default class Controls extends ShadowComponent {
 
     // A labelled on/off toggle bound to a settings key. `mt` adds top margin to space it
     // from the previous sibling — every call site passes it except the first in a group.
-    this[toggleRow] = (key, label, mt = true) => html`
+    // An optional `desc` renders as a <small> underneath, for a toggle whose effect isn't
+    // obvious from the label alone.
+    this[toggleRow] = (key, label, mt = true, desc = '') => html`
       <div class="row ai-c ${mt ? 'mt' : ''}">
         <k-toggle .value=${this.settings[key]} @change=${e => this[setSetting](key, e.detail.value)}></k-toggle>
         <span class="mlh">${label}</span>
-      </div>`;
+      </div>
+      ${desc ? html`<small class="tc-muted d-b">${desc}</small>` : ''}`;
 
     // A detection tier as an accordion section: icon + name in the header; description,
     // enable toggle and threshold slider revealed inside the panel. All three tiers'
@@ -111,6 +116,11 @@ export default class Controls extends ShadowComponent {
           </div>
         </k-accordion-panel>`;
     };
+
+    // The settings panel lives in a k-dialog declared right in this component's own
+    // template (not Dialog.create()), so its toggles/sliders stay bound to the same
+    // this.settings getter as everything else and update live like any other render.
+    this[openSettings] = () => this.renderRoot.querySelector('#settingsDialog')?.open();
 
     /*
       Init Props
@@ -186,34 +196,54 @@ export default class Controls extends ShadowComponent {
           </k-accordion>
         </div>
 
-        <k-accordion persistent-id="dup-settings" class="b r d-b ovf-h mt">
-          <k-accordion-header for-panel="settings" class="row ai-c ph">
-            <k-icon name="settings" class="mrh mlq"></k-icon><strong>Settings</strong>
-          </k-accordion-header>
-          <k-accordion-panel name="settings">
-            <div class="ph">
-              ${this[toggleRow]('recursive', 'Include subfolders', false)}
-              ${this[toggleRow]('preferGPU', 'Use GPU if available')}
-              ${this[toggleRow]('confirmDelete', 'Confirm deletion')}
-              ${this[toggleRow]('deprioritizeScreenshots', 'Auto Delete: prefer to keep originals over screenshots')}
-              <div class="mt">
-                <span class="d-b mbq">Max images per dupe set</span>
-                <id-slider-input min="2" max="30" .value=${this.settings.maxGroupSize} format="integer"
-                  @change=${e => this[setSetting]('maxGroupSize', e.detail.value)}></id-slider-input>
-              </div>
-              <div class="mt">
-                <span class="d-b mbq">Set cohesion</span>
-                <p class="tc-muted small mbh">Every image in a set must be this similar to <em>every</em> other one, as a share of the thresholds above. Higher means tighter sets; 0% lets a set chain together through a middleman image that both halves match but that don't match each other.</p>
-                <id-slider-input min="0" max="100" .value=${Math.round((this.settings.cohesion ?? 0.5) * 100)} format="integer"
-                  @change=${e => this[setSetting]('cohesion', e.detail.value / 100)}></id-slider-input>
-              </div>
-              <div class="row mt">
-                <button class="danger small mrh" @click=${() => this[emit]('clear-cache')}>Clear cache</button>
-                <button class="danger small" @click=${() => this[emit]('reset-settings')}>Reset settings</button>
-              </div>
+        <div class="row mt">
+          <button class="col mrh" @click=${() => this[openSettings]()}>
+            <k-icon name="settings" class="mrh"></k-icon> Settings
+          </button>
+          <button class="danger col" ?disabled=${this.sources.reference.length === 0 && this.sources.search.length === 0}
+            title="Clear cached &quot;Not Duplicate&quot; marks for images in your current Reference/Search folders"
+            @click=${() => this[emit]('clear-source-cache')}>
+            <k-icon name="folder_delete" class="mrh"></k-icon> Clear Folder Cache
+          </button>
+        </div>
+        <k-dialog id="settingsDialog" style="--width: 26rem">
+          <h6 slot="title" class="pyh px m0 row ai-c"><k-icon name="settings" class="mrh"></k-icon> Settings</h6>
+          <div class="p">
+            ${this[toggleRow]('recursive', 'Include subfolders', false)}
+            ${this[toggleRow]('preferGPU', 'Use GPU if available')}
+            ${this[toggleRow]('confirmDelete', 'Confirm deletion')}
+            ${this[toggleRow]('deprioritizeScreenshots', 'Auto Delete: prefer to keep originals over screenshots')}
+            ${this[toggleRow]('autoDeletePreview', 'Auto Delete Selection Indicators', true,
+              'Outlines the image Auto Delete would keep in green, and the ones it would delete in red, right on the tiles — so you can see the pick before you ever click Auto Delete.')}
+            <div class="mt">
+              <span class="d-b mbq">Max images per dupe set</span>
+              <id-slider-input min="2" max="30" .value=${this.settings.maxGroupSize} format="integer"
+                @change=${e => this[setSetting]('maxGroupSize', e.detail.value)}></id-slider-input>
             </div>
-          </k-accordion-panel>
-        </k-accordion>
+            <div class="mt">
+              <span class="d-b mbq">Set cohesion</span>
+              <p class="tc-muted small mbh">Every image in a set must be this similar to <em>every</em> other one, as a share of the thresholds above. Higher means tighter sets; 0% lets a set chain together through a middleman image that both halves match but that don't match each other.</p>
+              <id-slider-input min="0" max="100" .value=${Math.round((this.settings.cohesion ?? 0.5) * 100)} format="integer"
+                @change=${e => this[setSetting]('cohesion', e.detail.value / 100)}></id-slider-input>
+            </div>
+            <div class="mt">
+              <span class="d-b mbq">Undo/redo history length</span>
+              <p class="tc-muted small mbh">How many delete / Not Duplicates actions Undo can step back through. On macOS, a longer history also means a deleted file waits longer in this app's own trash folder before it's handed off to the real Trash.</p>
+              <select .value=${String(this.settings.actionHistoryLength ?? 100)}
+                @change=${e => this[setSetting]('actionHistoryLength', Number(e.target.value))}>
+                <option value="10">10</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+                <option value="500">500</option>
+                <option value="1000">1000</option>
+              </select>
+            </div>
+            <div class="row mt">
+              <button class="danger small mrh" @click=${() => this[emit]('clear-cache')}>Clear cache</button>
+              <button class="danger small" @click=${() => this[emit]('reset-settings')}>Reset settings</button>
+            </div>
+          </div>
+        </k-dialog>
 
         <button class="${this.scanning ? 'danger' : 'primary'} full mt" ?disabled=${scanDisabled}
           @click=${() => this[emit](this.scanning ? 'cancel-scan' : 'start-scan')}>${this.scanning ? 'Cancel Scan' : 'Start Scan'}</button>

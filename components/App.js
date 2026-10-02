@@ -9,9 +9,9 @@ import './Controls.js';
 import './Results.js';
 import './Detail.js';
 import {
-  selectIn, bulkUpsert, embToB64, b64ToEmb, clearCache, removeFromCache,
-  buildCandidatePairs, clusterPairs, remapOrb, OrbMatcher, pairKey, markNotDuplicates, getExcludedPairs,
-  migrateExcludedPairs, gcCache, DEFAULT_COHESION
+  selectIn, bulkUpsert, embToB64, b64ToEmb, clearCache, clearExclusionsInSources, removeFromCache,
+  buildCandidatePairs, clusterPairs, remapOrb, OrbMatcher, pairKey, markNotDuplicates, unmarkNotDuplicates,
+  getExcludedPairs, migrateExcludedPairs, gcCache, DEFAULT_COHESION
 } from '/lib/engine.js';
 
 /*
@@ -22,7 +22,7 @@ const confirmDialog = (text, opts = {}) => new Promise(res => Dialog.confirm(tex
 const alertDialog = (text, opts = {}) => new Promise(res => Dialog.alert(text, res, opts));
 
 const MODEL_NN = 'Xenova/dinov2-small';
-const DEFAULT_SETTINGS = { recursive: true, usePhash: true, useNN: true, useGeo: true, useCopy: true, preferGPU: true, confirmDelete: true, maxGroupSize: 10, cohesion: DEFAULT_COHESION, orbFloor: 0, orbCap: 20000, thumbSize: 'medium', deprioritizeScreenshots: true };
+const DEFAULT_SETTINGS = { recursive: true, usePhash: true, useNN: true, useGeo: true, useCopy: true, preferGPU: true, confirmDelete: true, maxGroupSize: 10, cohesion: DEFAULT_COHESION, orbFloor: 0, orbCap: 20000, thumbSize: 'medium', deprioritizeScreenshots: true, autoDeletePreview: true, actionHistoryLength: 100 };
 // Per-tier match thresholds (%). Each tier's raw score is remapped (see lib/engine.js's
 // remapEmbed/remapPhash/remapOrb) so 50% lands exactly on that tier's real decision
 // boundary — the same default works for all three instead of needing separate tuning.
@@ -40,11 +40,20 @@ const orb = Symbol('orb');
 const seedConfig = Symbol('seedConfig');
 const setProgress = Symbol('setProgress');
 const clusterSettings = Symbol('clusterSettings');
+const rebuildPairs = Symbol('rebuildPairs');
 const recluster = Symbol('recluster');
 const syncViewerToSelection = Symbol('syncViewerToSelection');
 const trashPaths = Symbol('trashPaths');
 const removeItem = Symbol('removeItem');
 const showKeyboardControls = Symbol('showKeyboardControls');
+const undoStack = Symbol('undoStack');
+const redoStack = Symbol('redoStack');
+const pushHistoryEntry = Symbol('pushHistoryEntry');
+const trimHistory = Symbol('trimHistory');
+const finalizeHistoryEntry = Symbol('finalizeHistoryEntry');
+const clearHistory = Symbol('clearHistory');
+const pruneStaleNotDuplicateEntries = Symbol('pruneStaleNotDuplicateEntries');
+const reinsertItems = Symbol('reinsertItems');
 
 export default class App extends ShadowComponent {
   /*
@@ -57,7 +66,12 @@ export default class App extends ShadowComponent {
     lastScan: { type: Object },
     // Read by render (passed to the results/detail panes), so it has to re-render the
     // children when it changes — hence reactive state rather than a private symbol.
-    items: { state: true }
+    items: { state: true },
+    // Mirror of whether undoStack/redoStack have anything in them — plain arrays behind a
+    // private symbol wouldn't trigger a re-render on push/pop, so these get reassigned
+    // alongside every stack mutation purely so Detail's Undo/Redo buttons update.
+    canUndo: { state: true },
+    canRedo: { state: true }
   };
 
   /*
@@ -75,6 +89,11 @@ export default class App extends ShadowComponent {
     this[excluded] = new Set(); // pairKey(hashA,hashB) for user-confirmed not-duplicates
     this[cancelRequested] = false;
     this[orb] = new OrbMatcher();
+    // Undo/redo history — see the entry-shape comment on pushHistoryEntry. In-memory only
+    // (not persisted): it's meaningless across a reload anyway, since items/pairs/groups
+    // are rebuilt from scratch then too.
+    this[undoStack] = [];
+    this[redoStack] = [];
 
     /*
       Private Methods
@@ -126,6 +145,24 @@ export default class App extends ShadowComponent {
       };
     };
 
+    // Recompute this[pairs] from scratch and drop whatever this[excluded] currently
+    // covers — the same two steps scan() runs right after buildCandidatePairs. Needed
+    // any time this[excluded] shrinks (an exclusion gets lifted) rather than just
+    // recluster()-ing: scan() already stripped every *then*-excluded pair out of
+    // this[pairs] entirely (so ORB doesn't waste time verifying a pair that can never
+    // link — see the comment where scan() does it), so a pair excluded before the last
+    // scan isn't merely blocked, it's physically absent — recluster() alone can't bring
+    // it back no matter how this[excluded] changes. A freshly-scanned pair (never
+    // excluded, or excluded and un-excluded in the same session with no scan in between)
+    // was never stripped, so this is a no-op difference for it either way.
+    this[rebuildPairs] = () => {
+      this[pairs] = buildCandidatePairs(this.items, this.settings);
+      if (this[excluded].size) {
+        const keyOf = p => pairKey(this.items[p.i].hash, this.items[p.j].hash);
+        this[pairs] = this[pairs].filter(p => !this[excluded].has(keyOf(p)));
+      }
+    };
+
     // `advance`: skip the member-overlap lookup and instead reselect whatever now sits
     // in the same list position the current selection had — for actions that mean to
     // dissolve the current set entirely (e.g. Not Duplicates), where "stay on this set"
@@ -171,11 +208,18 @@ export default class App extends ShadowComponent {
         if (!ok) return;
       }
 
+      // One history entry for the whole batch (Auto Delete / Delete Selected undoes/redoes
+      // together, matching the single user action it was) — pushed for whatever succeeded
+      // even if a later file in the batch fails, so an early stop doesn't lose the undo.
+      const done = [];
       for (const path of paths) {
+        const item = this.items.find(i => i.path === path);
         const r = await api.fileAction('trash', path);
-        if (!r.ok) { Toast.error('Could not delete the file: ' + (r.error || 'unknown error')); return; }
+        if (!r.ok) { Toast.error('Could not delete the file: ' + (r.error || 'unknown error')); break; }
+        done.push({ path, trashedPath: r.trashedPath || null, item });
         await this[removeItem](path);
       }
+      if (done.length) this[pushHistoryEntry]({ type: 'trash', items: done });
     };
 
     this[removeItem] = async path => {
@@ -211,6 +255,100 @@ export default class App extends ShadowComponent {
       }
     };
 
+    /*
+      Undo/redo history. Two entry shapes:
+        { type: 'trash', items: [{ path, trashedPath, item }] } — trashedPath is only ever
+          set on macOS (see api/fileAction.js's app-managed trash); `item` is the exact
+          object that was in this.items right before it was removed, kept so undo can
+          splice it back with its cached phash/embedding/sscd intact, no rescan needed.
+        { type: 'not-duplicate', hashes: [...] } — the content hashes marked as a group.
+      A fresh user action pushes onto undoStack and drops (finalizing) whatever was on
+      redoStack — the usual "a new edit clears redo" rule.
+    */
+    this[finalizeHistoryEntry] = entry => {
+      if (entry?.type !== 'trash') return;
+      // Only macOS's app-managed trash needs this — win/linux items just keep sitting in
+      // the real Recycle Bin/Trash as always, nothing of ours to release.
+      for (const it of entry.items) {
+        if (it.trashedPath) api.fileAction('finalizeTrash', it.trashedPath).catch(() => {});
+      }
+    };
+
+    this[trimHistory] = () => {
+      const max = this.settings.actionHistoryLength || DEFAULT_SETTINGS.actionHistoryLength;
+      while (this[undoStack].length > max) this[finalizeHistoryEntry](this[undoStack].shift());
+      while (this[redoStack].length > max) this[finalizeHistoryEntry](this[redoStack].shift());
+      this.canUndo = this[undoStack].length > 0;
+      this.canRedo = this[redoStack].length > 0;
+    };
+
+    this[pushHistoryEntry] = entry => {
+      this[redoStack].forEach(e => this[finalizeHistoryEntry](e));
+      this[redoStack] = [];
+      this[undoStack].push(entry);
+      this[trimHistory]();
+    };
+
+    // Everything the stacks reference (item snapshots, pair indices) is about to be
+    // invalidated wholesale — called wherever items/pairs get wiped and rebuilt from
+    // scratch (a fresh scan, a source removed) or the DB decisions they'd redo/undo are
+    // being wiped too (Clear cache).
+    this[clearHistory] = () => {
+      this[undoStack].forEach(e => this[finalizeHistoryEntry](e));
+      this[redoStack].forEach(e => this[finalizeHistoryEntry](e));
+      this[undoStack] = [];
+      this[redoStack] = [];
+      this.canUndo = false;
+      this.canRedo = false;
+    };
+
+    // A scoped exclusion clear (onClearSourceCache) drops specific excluded_pairs rows
+    // without touching the rest of the DB — unlike clearCache(), that's not sweeping
+    // enough to justify wiping every trash entry too, only the 'not-duplicate' entries
+    // whose own rows were among those just dropped (undoing/redoing one now would toggle
+    // rows the DB no longer has any record of agreeing to either way).
+    this[pruneStaleNotDuplicateEntries] = removedPairKeys => {
+      if (!removedPairKeys?.length) return;
+      const removed = new Set(removedPairKeys);
+      const isStale = e => {
+        if (e.type !== 'not-duplicate') return false;
+        for (let i = 0; i < e.hashes.length; i++) {
+          for (let j = i + 1; j < e.hashes.length; j++) {
+            if (removed.has(pairKey(e.hashes[i], e.hashes[j]))) return true;
+          }
+        }
+        return false;
+      };
+      this[undoStack] = this[undoStack].filter(e => !isStale(e));
+      this[redoStack] = this[redoStack].filter(e => !isStale(e));
+      this.canUndo = this[undoStack].length > 0;
+      this.canRedo = this[redoStack].length > 0;
+    };
+
+    // Splice previously-removed item snapshots back into the live results (Undo of a
+    // trash). Reuses buildCandidatePairs over the whole item list — the same pure,
+    // synchronous math a scan already runs, just skipped for geometric verification (which
+    // needs the ORB worker pool and real per-pair image comparison, not worth redoing
+    // synchronously for an undo) — so a restored item's pairs read as "not yet
+    // geometrically checked" exactly like right after a fresh scan and before ORB's pass;
+    // a later rescan verifies it properly. Returns the snapshots actually spliced back in
+    // (a path already present — e.g. the user manually restored it before hitting Undo —
+    // is skipped rather than duplicated).
+    this[reinsertItems] = snaps => {
+      const existing = new Set(this.items.map(i => i.path));
+      const fresh = snaps.filter(s => s && !existing.has(s.path));
+      if (!fresh.length) return fresh;
+
+      this.items = [...this.items, ...fresh];
+      this[rebuildPairs]();
+      this[recluster]();
+
+      const freshPaths = new Set(fresh.map(s => s.path));
+      const ng = this.groups.find(g => g.members.some(mi => freshPaths.has(this.items[mi].path)));
+      if (ng) this.selectedId = ng.id;
+      return fresh;
+    };
+
     this[showKeyboardControls] = async () => {
       await alertDialog(`
         <div class="p">
@@ -224,6 +362,8 @@ export default class App extends ShadowComponent {
                 <tr><td><strong>Delete</strong></td><td>Not in Photo Viewer</td><td>Auto Delete the selected dupe set</td></tr>
                 <tr><td><strong>Backspace</strong></td><td>Always</td><td>Delete the checked images, if any are checked</td></tr>
                 <tr><td><strong>&#96;</strong> / <strong>~</strong></td><td>Always</td><td>Mark the selected dupe set as Not Duplicates</td></tr>
+                <tr><td><strong>Ctrl/Cmd + Z</strong></td><td>Always</td><td>Undo the last delete or Not Duplicates action</td></tr>
+                <tr><td><strong>Ctrl/Cmd + Shift + Z</strong></td><td>Always</td><td>Redo the last undone action</td></tr>
                 <tr><td><strong>Left</strong> / <strong>Right</strong></td><td>Only in Photo Viewer</td><td>Move through the photos</td></tr>
                 <tr><td><strong>Delete</strong></td><td>Only in Photo Viewer</td><td>Delete the photo currently shown</td></tr>
                 <tr><td><strong>Esc</strong></td><td>Only in Photo Viewer</td><td>Close the viewer</td></tr>
@@ -242,6 +382,8 @@ export default class App extends ShadowComponent {
     this.groups = [];
     this.lastScan = null;
     this.items = [];
+    this.canUndo = false;
+    this.canRedo = false;
   }
 
   /*
@@ -263,6 +405,10 @@ export default class App extends ShadowComponent {
     this[uiEl]?.addEventListener('context:set', this.onUIChange);
     document.addEventListener('menu-action', this.onMenuAction);
     document.addEventListener('keydown', this.onGlobalKeydown);
+    // Anything left in macOS's app-managed trash folder belongs to an undo history that
+    // died with the last session (it's in-memory only) — hand it off to the real Trash
+    // rather than let it sit there untracked forever. No-op on Windows/Linux.
+    api.fileAction('sweepTrash').catch(() => {});
   }
   disconnectedCallback() {
     super.disconnectedCallback();
@@ -293,6 +439,7 @@ export default class App extends ShadowComponent {
     this[cancelRequested] = false;
     this.items = []; this[pairs] = []; this.groups = []; this.selectedId = null;
     this[orb].dispose();
+    this[clearHistory]();
 
     try {
       this[setProgress](0, 'Scanning folders…');
@@ -446,17 +593,13 @@ export default class App extends ShadowComponent {
         computedTiers: { usePhash, useNN, useGeo, useCopy: useCopy && copyReady }
       };
 
-      this[pairs] = buildCandidatePairs(this.items, this.settings);
-
       // Load every user-confirmed not-duplicate pair (clusterPairs needs the full set to
-      // catch transitive conflicts, not just direct candidate pairs — see its comment).
-      // Drop directly-excluded candidate pairs now too, purely so ORB doesn't waste time
-      // geometrically verifying a pair we already know must never link.
+      // catch transitive conflicts, not just direct candidate pairs — see its comment)
+      // before building candidates, so rebuildPairs's own filter drops directly-excluded
+      // pairs immediately — purely so ORB doesn't waste time geometrically verifying a
+      // pair we already know must never link.
       this[excluded] = await getExcludedPairs();
-      if (this[excluded].size) {
-        const keyOf = p => pairKey(this.items[p.i].hash, this.items[p.j].hash);
-        this[pairs] = this[pairs].filter(p => !this[excluded].has(keyOf(p)));
-      }
+      this[rebuildPairs]();
 
       // 3) Geometric verification. The neural embedding only *finds candidates* here;
       //    grouping requires real copy evidence (ORB overlap or pHash) — see pairScore.
@@ -548,6 +691,7 @@ export default class App extends ShadowComponent {
       if (paths(oldValue).some(p => !newPaths.has(p))) {
         document.querySelectorAll('k-photo-viewer[fullscreen]').forEach(v => v.close());
         this.items = []; this[pairs] = []; this.groups = []; this.lastScan = null; this.selectedId = null;
+        this[clearHistory]();
       }
     } else if (key === 'settings') {
       const computed = this.lastScan?.computedTiers;
@@ -564,6 +708,9 @@ export default class App extends ShadowComponent {
         }
       }
       if (this.items.length) this[recluster]();
+      // A shorter history length than before means evicting (and, on macOS, finalizing)
+      // whatever now falls outside it.
+      this[trimHistory]();
     } else if (key === 'thresholds' && this.items.length) {
       this[recluster]();
     }
@@ -573,18 +720,24 @@ export default class App extends ShadowComponent {
 
   // Enter opens the first photo of the selected dupe set, Delete runs Auto Delete on it,
   // Backspace runs Delete Selected, ` (or ~) runs Not Duplicates, Up/Down move the
-  // selection to the previous/next dupe set, and Home/End jump to the first/last
-  // dupe set — but not while focus is on a button/link/input/dialog, where those
-  // keys already do something else (activate, submit, confirm, delete-current-photo).
+  // selection to the previous/next dupe set, Home/End jump to the first/last dupe set, and
+  // Ctrl/Cmd+Z / Ctrl/Cmd+Shift+Z undo/redo the last such action — but not while focus is
+  // on a button/link/input/dialog, where those keys already do something else (activate,
+  // submit, confirm, delete-current-photo, the browser's own text-field undo).
   onGlobalKeydown = async e => {
     const isNav = e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'Home' || e.key === 'End';
     const isTilde = e.key === '~' || e.key === '`';
-    if (e.key !== 'Enter' && e.key !== 'Delete' && e.key !== 'Backspace' && !isTilde && !isNav) return;
+    const isZ = (e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 'z' || e.key === 'Z');
+    const isUndo = isZ && !e.shiftKey;
+    const isRedo = isZ && e.shiftKey;
+    if (e.key !== 'Enter' && e.key !== 'Delete' && e.key !== 'Backspace' && !isTilde && !isNav && !isZ) return;
     const path = e.composedPath();
     const target = path[0];
     if (['BUTTON', 'A', 'INPUT', 'TEXTAREA', 'SELECT'].includes(target?.tagName)) return;
     if (target?.isContentEditable) return;
     if (path.some(el => el?.tagName === 'K-DIALOG')) return;
+    if (isUndo) { e.preventDefault(); this.onUndo(); return; }
+    if (isRedo) { e.preventDefault(); this.onRedo(); return; }
     if (!this.groups.find(g => g.id === this.selectedId)) return;
     const detail = this.shadowRoot.querySelector('id-detail');
     const viewerOpen = !!document.querySelector('k-photo-viewer[fullscreen]');
@@ -624,9 +777,41 @@ export default class App extends ShadowComponent {
     try {
       await clearCache();
       this[excluded] = new Set();
-      if (this.items.length) this[recluster]();
+      // "Not duplicate" marks are part of what just got wiped, and a trashed file's
+      // history entry can't undo anything the DB no longer remembers agreeing to either way.
+      this[clearHistory]();
+      // Every exclusion just disappeared, including ones the last scan had already
+      // stripped straight out of this[pairs] (see rebuildPairs's comment) — recluster()
+      // alone wouldn't bring those candidate pairs back.
+      if (this.items.length) { this[rebuildPairs](); this[recluster](); }
       Toast.success('Cache cleared.');
     } catch (e) { Toast.error('Could not clear cache: ' + (e?.message || e)); }
+  };
+
+  // Scoped sibling of onClearCache — only drops "Not Duplicate" marks touching an image
+  // under the *currently configured* Reference/Search sources, leaving marks for folders
+  // no longer in scope (and every other cache table) untouched. Reflected immediately, no
+  // rescan needed — same as onNotDuplicates/onClearCache.
+  onClearSourceCache = async () => {
+    const list = [...this.sources.reference, ...this.sources.search];
+    if (!list.length) { Toast.warning('Add a Reference or Search folder first.'); return; }
+    const ok = await confirmDialog(
+      '<p class="p">Clear "Not Duplicate" marks for images in your current Reference and Search folders? ' +
+      'Cached hashes and analysis stay put — only those marks are dropped, and only for folders you\'re ' +
+      'currently working in.</p>',
+      { title: 'Clear Folder Cache', width: '28rem' });
+    if (!ok) return;
+    try {
+      const removed = await clearExclusionsInSources(list);
+      for (const p of removed) this[excluded].delete(p);
+      this[pruneStaleNotDuplicateEntries](removed);
+      // A lifted exclusion may have been in place since before the last scan, which
+      // strips a then-excluded pair out of this[pairs] entirely — see rebuildPairs.
+      if (this.items.length) { this[rebuildPairs](); this[recluster](); }
+      Toast.success(removed.length
+        ? `Cleared ${removed.length} "Not Duplicate" mark${removed.length === 1 ? '' : 's'}.`
+        : 'No "Not Duplicate" marks found in the current folders.');
+    } catch (e) { Toast.error('Could not clear folder cache: ' + (e?.message || e)); }
   };
 
   onResetSettings = async () => {
@@ -647,9 +832,11 @@ export default class App extends ShadowComponent {
           { title: 'Move to Trash', confirmText: 'Trash', confirmClasses: 'danger ml', cancelText: 'Cancel', cancelClasses: 'secondary' });
         if (!ok) { onDone?.(false); return; }
       }
+      const item = this.items.find(i => i.path === path);
       const r = await api.fileAction('trash', path);
       if (!r.ok) { Toast.error('Could not delete the file: ' + (r.error || 'unknown error')); onDone?.(false); return; }
       await this[removeItem](path);
+      this[pushHistoryEntry]({ type: 'trash', items: [{ path, trashedPath: r.trashedPath || null, item }] });
       onDone?.(true);
       return;
     }
@@ -684,11 +871,82 @@ export default class App extends ShadowComponent {
     for (let i = 0; i < hashes.length; i++) {
       for (let j = i + 1; j < hashes.length; j++) this[excluded].add(pairKey(hashes[i], hashes[j]));
     }
+    this[pushHistoryEntry]({ type: 'not-duplicate', hashes });
     // The marked set is gone for good (those members can never group together again),
     // so move to whatever now sits in the same list position rather than trying to
     // find "the same set" — and keep the Photo Viewer in sync if it's open.
     this[recluster]({ advance: true });
     await this[syncViewerToSelection]();
+  };
+
+  // Undo the most recent trash or Not Duplicates action. A trash undo restores the
+  // physical file (Recycle Bin on Windows/Linux, our own app trash on macOS — see
+  // api/fileAction.js) and splices its snapshot back into the live results; a Not
+  // Duplicates undo just drops the exclusion rows it added. Reported failures (the file's
+  // no longer in the Recycle Bin, something now already sits at its original path) leave
+  // the rest of the app state untouched rather than half-applying the undo.
+  onUndo = async () => {
+    const entry = this[undoStack].pop();
+    this.canUndo = this[undoStack].length > 0;
+    if (!entry) return;
+
+    if (entry.type === 'trash') {
+      const restored = [], failed = [];
+      for (const it of entry.items) {
+        const r = await api.fileAction('restore', it.path, it.trashedPath);
+        if (r?.ok) restored.push(it); else failed.push(r?.error);
+      }
+      if (restored.length) this[reinsertItems](restored.map(it => it.item));
+      if (failed.length) {
+        Toast.error(failed.length === entry.items.length
+          ? `Could not undo: ${failed[0] || 'the file is no longer available to restore.'}`
+          : `Restored ${restored.length} of ${entry.items.length} file(s) — ${failed.length} could not be recovered.`);
+      }
+      if (restored.length) { this[redoStack].push({ type: 'trash', items: restored }); this[trimHistory](); }
+    } else if (entry.type === 'not-duplicate') {
+      await unmarkNotDuplicates(entry.hashes);
+      for (let i = 0; i < entry.hashes.length; i++) {
+        for (let j = i + 1; j < entry.hashes.length; j++) this[excluded].delete(pairKey(entry.hashes[i], entry.hashes[j]));
+      }
+      this[recluster]();
+      const hset = new Set(entry.hashes);
+      const ng = this.groups.find(g => g.members.some(mi => hset.has(this.items[mi].hash)));
+      if (ng) this.selectedId = ng.id;
+      this[redoStack].push(entry);
+      this[trimHistory]();
+    }
+    this.canRedo = this[redoStack].length > 0;
+  };
+
+  // Redo re-applies whatever Undo just reverted: re-trashes the same file(s) (a fresh
+  // Recycle Bin / app-trash entry — the old trashedPath is gone once restored), or
+  // re-marks the same hashes as Not Duplicates.
+  onRedo = async () => {
+    const entry = this[redoStack].pop();
+    this.canRedo = this[redoStack].length > 0;
+    if (!entry) return;
+
+    if (entry.type === 'trash') {
+      const done = [];
+      for (const it of entry.items) {
+        if (!this.items.some(i => i.path === it.path)) continue; // no longer present somehow
+        const r = await api.fileAction('trash', it.path);
+        if (!r.ok) { Toast.error('Could not redo delete: ' + (r.error || 'unknown error')); continue; }
+        done.push({ path: it.path, trashedPath: r.trashedPath || null, item: it.item });
+        await this[removeItem](it.path);
+      }
+      if (done.length) { this[undoStack].push({ type: 'trash', items: done }); this[trimHistory](); }
+    } else if (entry.type === 'not-duplicate') {
+      await markNotDuplicates(entry.hashes);
+      for (let i = 0; i < entry.hashes.length; i++) {
+        for (let j = i + 1; j < entry.hashes.length; j++) this[excluded].add(pairKey(entry.hashes[i], entry.hashes[j]));
+      }
+      this[recluster]({ advance: true });
+      await this[syncViewerToSelection]();
+      this[undoStack].push(entry);
+      this[trimHistory]();
+    }
+    this.canUndo = this[undoStack].length > 0;
   };
 
   /*
@@ -701,15 +959,16 @@ export default class App extends ShadowComponent {
         <id-controls
           .scanning=${this.scanning} .progress=${this.progress}
           @start-scan=${this.onStartScan} @cancel-scan=${this.onCancelScan} @clear-cache=${this.onClearCache}
-          @reset-settings=${this.onResetSettings}></id-controls>
+          @clear-source-cache=${this.onClearSourceCache} @reset-settings=${this.onResetSettings}></id-controls>
 
         <k-split slot="right" persistent-id="dup-inner" grip style="height:100%; --pane_1_size:33.333%;">
           <id-results
             .groups=${this.groups} .items=${this.items} .summary=${this.lastScan} .scanning=${this.scanning}></id-results>
           <id-detail slot="right"
-            .group=${selGroup} .items=${this.items}
+            .group=${selGroup} .items=${this.items} .canUndo=${this.canUndo} .canRedo=${this.canRedo}
             @file-action=${this.onFileAction} @auto-delete=${this.onAutoDelete}
-            @delete-selected=${this.onDeleteSelected} @not-duplicates=${this.onNotDuplicates}></id-detail>
+            @delete-selected=${this.onDeleteSelected} @not-duplicates=${this.onNotDuplicates}
+            @undo=${this.onUndo} @redo=${this.onRedo}></id-detail>
         </k-split>
       </k-split>`;
   }

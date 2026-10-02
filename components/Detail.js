@@ -21,6 +21,17 @@ const formatRank = name => {
 // taken on outscales the source), which would otherwise win the "keep" slot on
 // resolution alone — this catches that before resolution is even compared.
 const isScreenshot = name => /screenshot/i.test(name);
+// OS-generated duplicate copies get a marker appended before the extension — a
+// "(1)", "(2)", etc. from Chrome re-downloads or Windows' "keep both files" prompt,
+// or a "- Copy" / "- Copy (2)" from Windows Explorer's own Ctrl+C/Ctrl+V. These are
+// almost always byte-identical to the file they were copied from, so resolution,
+// format, and file size won't tell the two apart — this is checked only as a last
+// tiebreak, ahead of the plain alphabetical compare, which would otherwise favor the
+// suffixed copy (a space sorts before a dot, so "photo (1).jpg" < "photo.jpg").
+const hasCopySuffix = name => {
+  const base = name.replace(/\.[^./\\]+$/, '').trim();
+  return /\(\d+\)$/.test(base) || /-\s*copy(\s*\(\d+\))?$/i.test(base);
+};
 
 const TILE_SIZES = { small: 220, medium: 320, large: 420 };
 
@@ -29,12 +40,17 @@ const TILE_SIZES = { small: 220, medium: 320, large: 420 };
 */
 const cfg = Symbol('cfg');
 const selKey = Symbol('selKey');
+const previewKey = Symbol('previewKey');
 const act = Symbol('act');
+const triggerUndo = Symbol('triggerUndo');
+const triggerRedo = Symbol('triggerRedo');
 const setThumbSize = Symbol('setThumbSize');
 const orderedMembers = Symbol('orderedMembers');
 const openViewer = Symbol('openViewer');
 const wireViewerDelete = Symbol('wireViewerDelete');
+const rankGroup = Symbol('rankGroup');
 const autoDelete = Symbol('autoDelete');
+const updatePreview = Symbol('updatePreview');
 const toggleSelect = Symbol('toggleSelect');
 const deleteSelected = Symbol('deleteSelected');
 const notDuplicates = Symbol('notDuplicates');
@@ -48,7 +64,13 @@ export default class Detail extends ShadowComponent {
   static properties = {
     group: { type: Object },
     items: { type: Array },
-    selected: { type: Object }
+    selected: { type: Object },
+    keeperPath: { state: true },
+    // Owned by App (the undo/redo stacks live there, shared across the whole app rather
+    // than scoped to whichever set happens to be selected), just passed down to drive the
+    // toolbar buttons' disabled state.
+    canUndo: { type: Boolean },
+    canRedo: { type: Boolean }
   };
 
   /*
@@ -63,12 +85,19 @@ export default class Detail extends ShadowComponent {
     // Member paths of the set the checkbox selection belongs to — so a recluster that
     // only reorders/rescores the same members keeps the checkboxes.
     this[selKey] = '';
+    // Same idea for the Auto Delete preview: the key of the group `updatePreview` is
+    // currently computing, so a stale in-flight computation (group switched again
+    // before its thumbnails resolved) never overwrites a newer one's result.
+    this[previewKey] = '';
     this[cfg] = null; // dup-config context, resolved on connect
 
     /*
       Private Methods
     */
     this[act] = (action, path, onDone) => this.dispatchEvent(new CustomEvent('file-action', { detail: { action, path, onDone }, bubbles: true, composed: true }));
+
+    this[triggerUndo] = () => { if (this.canUndo) this.dispatchEvent(new CustomEvent('undo', { bubbles: true, composed: true })); };
+    this[triggerRedo] = () => { if (this.canRedo) this.dispatchEvent(new CustomEvent('redo', { bubbles: true, composed: true })); };
 
     this[setThumbSize] = value => this[cfg]?.set('settings', { ...this.settings, thumbSize: value });
 
@@ -122,16 +151,15 @@ export default class Detail extends ShadowComponent {
       viewers.forEach(v => v.addEventListener('fullscreenclose', cleanup));
     };
 
-    // Keep the highest-resolution image (ties broken by most-lossless format, then
-    // smallest file size, then alphabetically), and ask to delete the rest. Unless
-    // disabled, a screenshot loses to any non-screenshot regardless of resolution —
-    // see isScreenshot's comment.
-    this[autoDelete] = async () => {
-      const g = this.group;
-      if (!g || g.members.length < 2) return;
+    // Rank a group's members best-keeper-first: highest resolution (ties broken by most-lossless
+    // format, then smallest file size, then a "(1)"/"- Copy"-style name deprioritized, then
+    // alphabetically). Unless disabled, a screenshot loses to any non-screenshot regardless of
+    // resolution — see isScreenshot's comment. Shared by the Auto Delete action itself and the
+    // grid's live "who would win" preview, so both always agree.
+    this[rankGroup] = async g => {
       const deprioritizeScreenshots = this.settings.deprioritizeScreenshots;
 
-      const ranked = (await Promise.all(g.members.map(async mi => {
+      return (await Promise.all(g.members.map(async mi => {
         const it = this.items[mi];
         const t = await thumbnail(it.path, 480);
         return { path: it.path, name: it.name, size: it.size, area: (t?.width && t?.height) ? t.width * t.height : 0 };
@@ -144,14 +172,38 @@ export default class Detail extends ShadowComponent {
         const fa = formatRank(a.name), fb = formatRank(b.name);
         if (fa !== fb) return fa - fb;
         if (a.size !== b.size) return a.size - b.size;
+        const ca = hasCopySuffix(a.name), cb = hasCopySuffix(b.name);
+        if (ca !== cb) return ca ? 1 : -1;
         return a.name.localeCompare(b.name);
       });
+    };
 
-      const [keep, ...rest] = ranked;
+    this[autoDelete] = async () => {
+      const g = this.group;
+      if (!g || g.members.length < 2) return;
+      const [keep, ...rest] = await this[rankGroup](g);
       this.dispatchEvent(new CustomEvent('auto-delete', {
         detail: { keepPath: keep.path, keepName: keep.name, deletePaths: rest.map(d => d.path) },
         bubbles: true, composed: true
       }));
+    };
+
+    // Recompute which member Auto Delete would keep, so the grid can outline it in green
+    // (and the rest in red) before the user commits to anything. Re-entrant: if the group
+    // or settings change again before thumbnails resolve, the stale result is discarded
+    // via previewKey rather than clobbering the newer one.
+    this[updatePreview] = async () => {
+      const g = this.group;
+      if (!g || g.members.length < 2 || !this.settings.autoDeletePreview) { this[previewKey] = ''; this.keeperPath = null; return; }
+      const key = g.members.map(mi => this.items[mi]?.path).join('|');
+      // A genuinely new set of members: drop the old keeper now rather than let it
+      // briefly point at a path that isn't even in this group (which would flash
+      // every card red until the new ranking resolves).
+      if (key !== this[previewKey]) this.keeperPath = null;
+      this[previewKey] = key;
+      const [keep] = await this[rankGroup](g);
+      if (this[previewKey] !== key) return; // superseded by a newer group/settings change
+      this.keeperPath = keep.path;
     };
 
     this[toggleSelect] = (path, checked) => {
@@ -208,6 +260,9 @@ export default class Detail extends ShadowComponent {
     this.group = null;
     this.items = [];
     this.selected = new Set();
+    this.keeperPath = null;
+    this.canUndo = false;
+    this.canRedo = false;
   }
 
   /*
@@ -225,24 +280,27 @@ export default class Detail extends ShadowComponent {
 
   // Clear the checkbox selection whenever the actual set of members changes (not on
   // every recluster — same members just get reordered/rescored). Each id-image-card
-  // loads its own thumbnail.
+  // loads its own thumbnail. Also kicks off the Auto Delete preview for the (possibly new) group.
   updated(changedProperties) {
     if (changedProperties.has('group')) {
       const key = this.group ? this.group.members.map(mi => this.items[mi]?.path).join('|') : '';
       if (key !== this[selKey]) this.selected = new Set();
       this[selKey] = key;
+      this[updatePreview]();
     }
   }
 
   /*
     Protected Members
   */
-  get settings() { return this[cfg]?.get('settings') ?? { thumbSize: 'medium', deprioritizeScreenshots: true }; }
+  get settings() { return this[cfg]?.get('settings') ?? { thumbSize: 'medium', deprioritizeScreenshots: true, autoDeletePreview: true }; }
 
   /*
     Event Handlers
   */
-  onConfigChange = e => { if (e.detail.key === 'settings') this.requestUpdate(); };
+  // A settings change (e.g. toggling "deprioritize screenshots") doesn't touch the group
+  // property, so updated() won't recompute the preview on its own — nudge it here too.
+  onConfigChange = e => { if (e.detail.key === 'settings') { this.requestUpdate(); this[updatePreview](); } };
   // The card knows only its path; map it back to a position in the ordered members
   // to open the gallery on the right photo.
   onCardView = e => {
@@ -273,45 +331,64 @@ export default class Detail extends ShadowComponent {
   */
   render() {
     const g = this.group;
-    if (!g) return html`<div class="pane"><div class="center-empty ta-center tc-muted">Select a duplicate set to inspect it.</div></div>`;
+    // Undo/Redo live in this row (not gated behind a selected group) because the action
+    // they'd undo is often the very thing that just emptied the selection — e.g. the last
+    // dupe set in the list just got Auto Deleted or dismissed as Not Duplicates.
     return html`
       <div class="pane">
-        <div class="row ai-c jc-b mb">
-          <h3 class="m0">${g.members.length} images <span class="tc-muted">|</span> <id-scores .scores=${g.signals}></id-scores></h3>
+        <div class="row ai-c ${g ? 'bb pb mb' : 'mb'}">
+          <button class="mrh pxh" ?disabled=${!this.canUndo} title="Undo (Ctrl+Z)" @click=${() => this[triggerUndo]()}>
+            <k-icon name="undo"></k-icon>
+          </button>
+          <button class="${g ? 'mrh' : ''} pxh" ?disabled=${!this.canRedo} title="Redo (Ctrl+Shift+Z)" @click=${() => this[triggerRedo]()}>
+            <k-icon name="redo"></k-icon>
+          </button>
+          ${!g ? '' : html`
+            <button class="danger mrh" @click=${() => this[autoDelete]()}><k-icon name="delete_auto"></k-icon> Auto Delete</button>
+            <button class="danger mrh" ?disabled=${this.selected.size === 0} @click=${() => this[deleteSelected]()}>
+              <k-icon name="delete_sweep"></k-icon> Delete Selected
+            </button>
+            <button class="mrh" ?disabled=${!this[compareEnabled]()} @click=${() => this[compareSelected]()}>
+              <k-icon name="compare_arrows"></k-icon> Compare
+            </button>
+            <button @click=${() => this[notDuplicates]()}>
+              <b>≠</b> Not Duplicates
+            </button>
+            <span class="col"></span>
+            <div class="btn-grp">
+              ${[['small', 'tile_small', 'Small'], ['medium', 'tile_medium', 'Medium'], ['large', 'tile_large', 'Large']].map(([size, icon, label]) => html`
+                <button class="pq ${this.settings.thumbSize === size ? 'primary' : ''}" title="Tile ${label}" @click=${() => this[setThumbSize](size)}>
+                  <k-icon name=${icon}></k-icon>
+                </button>`)}
+            </div>
+          `}
         </div>
-        <div class="row ai-c bb pb mb">
-          <button class="danger mrh" @click=${() => this[autoDelete]()}><k-icon name="delete_auto"></k-icon> Auto Delete</button>
-          <button class="danger mrh" ?disabled=${this.selected.size === 0} @click=${() => this[deleteSelected]()}>
-            <k-icon name="delete_sweep"></k-icon> Delete Selected
-          </button>
-          <button class="mrh" ?disabled=${!this[compareEnabled]()} @click=${() => this[compareSelected]()}>
-            <k-icon name="compare_arrows"></k-icon> Compare
-          </button>
-          <button @click=${() => this[notDuplicates]()}>
-            <b>≠</b> Not Duplicates
-          </button>
-          <span class="col"></span>
-          <div class="btn-grp">
-            ${[['small', 'tile_small', 'Small'], ['medium', 'tile_medium', 'Medium'], ['large', 'tile_large', 'Large']].map(([size, icon, label]) => html`
-              <button class="pq ${this.settings.thumbSize === size ? 'primary' : ''}" title="Tile ${label}" @click=${() => this[setThumbSize](size)}>
-                <k-icon name=${icon}></k-icon>
-              </button>`)}
+        ${!g ? html`<div class="center-empty ta-center tc-muted">Select a duplicate set to inspect it.</div>` : html`
+          <div class="row ai-c jc-b mb">
+            <h3 class="m0">${g.members.length} images <span class="tc-muted">|</span> <id-scores .scores=${g.signals}></id-scores></h3>
           </div>
-        </div>
-        <div class="grid-fill" style="--col-min: ${TILE_SIZES[this.settings.thumbSize] || TILE_SIZES.medium}px">
-          ${this[orderedMembers]().map(mi => {
-            const it = this.items[mi];
-            return html`<id-image-card .item=${it} .checked=${this.selected.has(it.path)}
-              @card-view=${this.onCardView} @card-toggle=${this.onCardToggle}></id-image-card>`;
-          })}
-        </div>
+          <div class="grid-fill" style="--col-min: ${TILE_SIZES[this.settings.thumbSize] || TILE_SIZES.medium}px">
+            ${this[orderedMembers]().map(mi => {
+              const it = this.items[mi];
+              const previewRole = !this.keeperPath ? null : (it.path === this.keeperPath ? 'keep' : 'delete');
+              return html`<id-image-card .item=${it} .checked=${this.selected.has(it.path)} .previewRole=${previewRole}
+                @card-view=${this.onCardView} @card-toggle=${this.onCardToggle}></id-image-card>`;
+            })}
+          </div>
+        `}
       </div>`;
   }
 
-  // Only the grid-centered empty state; the tiles and score widget bring their own styles.
+  // .pane is flexed (overriding shared's block default, scoped to this shadow root only)
+  // so .center-empty can fill exactly the space left under the always-present Undo/Redo
+  // row instead of a flat height:100% overflowing the pane by that row's own height.
   static styles = [shared, css`
+    .pane {
+      display: flex;
+      flex-direction: column;
+    }
     .center-empty {
-      height: 100%;
+      flex: 1;
       display: grid;
       place-items: center;
     }
